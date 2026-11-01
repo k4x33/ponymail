@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<style>
+/*THEME*/
+html, body { margin:0; padding:0; background: var(--surface); color: var(--text); font-family: "Segoe UI","Helvetica Neue",Arial,sans-serif; }
+#fmt { position: sticky; top:0; z-index:5; display:flex; align-items:center; gap:4px; padding:6px 10px; background: var(--surface-alt); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+#fmt select, #fmt button { background: var(--surface); border:1px solid var(--border); border-radius:4px; color: var(--text); font-size:12px; padding:3px 6px; cursor:pointer; height:26px; }
+#fmt button:hover, #fmt select:hover { border-color: var(--accent); }
+#fmt button.b { font-weight:700; } #fmt button.i { font-style:italic; } #fmt button.u { text-decoration:underline; }
+#fmt .sep { width:1px; height:18px; background: var(--border); margin:0 4px; }
+.palette { display:flex; gap:3px; align-items:center; }
+.sw { width:16px; height:16px; border-radius:3px; border:1px solid rgba(0,0,0,.2); cursor:pointer; }
+.sw:hover { outline:2px solid var(--accent); }
+#wrap { padding: 0 0 40px 0; }
+#editor { width: 600px; box-sizing: border-box; padding: 16px 24px; margin: 0; min-height: 320px; outline: none; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 11pt; line-height: 1.45; color: var(--text); }
+#editor ul { list-style-type: square; }
+#editor p { margin: 0 0 0.6em 0; }
+#editor blockquote { border-left: 3px solid var(--border); margin: 10px 0; padding-left: 10px; color: var(--muted); }
+#pm-quote { margin-top: 18px; color: var(--muted); border-top:1px solid var(--border); padding-top: 10px; }
+.pm-img { display:inline-block; position:relative; max-width:100%; }
+.pm-img img { display:block; max-width:100%; height:auto; }
+.pm-img.sel { outline: 2px solid var(--accent); }
+.pm-img .h { display:none; position:absolute; width:10px; height:10px; background:#fff; border:2px solid var(--accent); border-radius:2px; }
+.pm-img.sel .h { display:block; }
+.h.nw { left:-6px; top:-6px; cursor:nwse-resize; } .h.ne { right:-6px; top:-6px; cursor:nesw-resize; }
+.h.sw { left:-6px; bottom:-6px; cursor:nesw-resize; } .h.se { right:-6px; bottom:-6px; cursor:nwse-resize; }
+</style>
+</head>
+<body>
+<div id="fmt">
+  <select id="font" onchange="cmd('fontName', this.value)">
+    <option value="Helvetica Neue, Helvetica, Arial, sans-serif">Helvetica Neue</option>
+    <option value="Arial, sans-serif">Arial</option>
+    <option value="Calibri, sans-serif">Calibri</option>
+    <option value="Segoe UI, sans-serif">Segoe UI</option>
+    <option value="Georgia, serif">Georgia</option>
+    <option value="Times New Roman, serif">Times New Roman</option>
+    <option value="Consolas, monospace">Consolas</option>
+  </select>
+  <select id="size" onchange="setSize(this.value)">
+    <option>8</option><option>9</option><option>10</option><option selected>11</option><option>12</option><option>14</option><option>16</option><option>18</option>
+  </select>
+  <span class="sep"></span>
+  <button class="b" title="Bold (Ctrl+B)" onclick="cmd('bold')">B</button>
+  <button class="i" title="Italic (Ctrl+I)" onclick="cmd('italic')">I</button>
+  <button class="u" title="Underline (Ctrl+U)" onclick="cmd('underline')">U</button>
+  <span class="sep"></span>
+  <button title="Bulleted list" onclick="cmd('insertUnorderedList')">▪ List</button>
+  <button title="Numbered list" onclick="cmd('insertOrderedList')">1. List</button>
+  <button title="Outdent" onclick="cmd('outdent')">⇤</button>
+  <button title="Indent" onclick="cmd('indent')">⇥</button>
+  <span class="sep"></span>
+  <button title="Link" onclick="link()">🔗</button>
+  <button title="Remove formatting" onclick="cmd('removeFormat')">Tx</button>
+  <span class="sep"></span>
+  <div class="palette" id="palette"></div>
+</div>
+<div id="wrap"><div id="editor" contenteditable="true"></div></div>
+<script>
+let bridge = null;
+const PALETTE = ['#000000','#444444','#C4314B','#E67E22','#F1C40F','#27AE60','#0F6CBD','#7030A0','#7F8C8D','#FFFFFF'];
+const pal = document.getElementById('palette');
+PALETTE.forEach(c => { const s = document.createElement('div'); s.className='sw'; s.style.background=c; s.title=c; s.onmousedown = e => { e.preventDefault(); cmd('foreColor', c); }; pal.appendChild(s); });
+const ed = document.getElementById('editor');
+
+new QWebChannel(qt.webChannelTransport, ch => { bridge = ch.objects.bridge; bridge.ready(); });
+
+function cmd(name, value){ ed.focus(); document.execCommand(name, false, value || null); notify(); }
+function setSize(pt){
+  ed.focus();
+  document.execCommand('fontSize', false, '7'); // placeholder size, then rewrite to pt
+  ed.querySelectorAll('font[size="7"]').forEach(f => { const span = document.createElement('span'); span.style.fontSize = pt + 'pt'; span.innerHTML = f.innerHTML; f.replaceWith(span); });
+  notify();
+}
+function link(){ const url = prompt('Link URL', 'https://'); if (url) cmd('createLink', url); }
+
+let t = null;
+function notify(){ if (!bridge) return; clearTimeout(t); t = setTimeout(() => bridge.contentChanged(), 50); }
+ed.addEventListener('input', notify);
+ed.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key.toLowerCase()==='b') { e.preventDefault(); cmd('bold'); }
+  if (e.ctrlKey && e.key.toLowerCase()==='i') { e.preventDefault(); cmd('italic'); }
+  if (e.ctrlKey && e.key.toLowerCase()==='u') { e.preventDefault(); cmd('underline'); }
+});
+
+/* ---- images: paste / drop → inline <img data:> with 4-corner resize handles ---- */
+function insertImageFile(file){
+  const r = new FileReader();
+  r.onload = () => insertImageDataUrl(r.result, file.name || 'image.png');
+  r.readAsDataURL(file);
+}
+function insertImageDataUrl(dataUrl, name){
+  ed.focus();
+  const id = 'img' + Date.now() + Math.floor(Math.random()*1e4);
+  const html = `<span class="pm-img" contenteditable="false" data-id="${id}"><img src="${dataUrl}" data-name="${name}" style="width:420px"><span class="h nw"></span><span class="h ne"></span><span class="h sw"></span><span class="h se"></span></span>&nbsp;`;
+  document.execCommand('insertHTML', false, html);
+  wireImages();
+  notify();
+}
+ed.addEventListener('paste', e => {
+  const items = (e.clipboardData || {}).items || [];
+  for (const it of items) { if (it.type && it.type.startsWith('image/')) { e.preventDefault(); insertImageFile(it.getAsFile()); return; } }
+});
+ed.addEventListener('dragover', e => { if (e.dataTransfer && e.dataTransfer.types.includes('Files')) e.preventDefault(); });
+ed.addEventListener('drop', e => {
+  const files = (e.dataTransfer || {}).files || [];
+  for (const f of files) if (f.type.startsWith('image/')) { e.preventDefault(); insertImageFile(f); }
+});
+let sel = null;
+document.addEventListener('mousedown', e => {
+  const wrap = e.target.closest('.pm-img');
+  document.querySelectorAll('.pm-img.sel').forEach(x => x.classList.remove('sel'));
+  sel = wrap; if (wrap) wrap.classList.add('sel');
+});
+function wireImages(){
+  ed.querySelectorAll('.pm-img .h').forEach(h => {
+    h.onmousedown = e => {
+      e.preventDefault(); e.stopPropagation();
+      const wrap = h.parentElement, img = wrap.querySelector('img');
+      const startX = e.clientX, startW = img.getBoundingClientRect().width, ratio = img.naturalWidth / img.naturalHeight;
+      const left = h.classList.contains('nw') || h.classList.contains('sw');
+      const move = ev => { const dx = ev.clientX - startX; let w = Math.max(40, left ? startW - dx : startW + dx); w = Math.min(w, 552); img.style.width = w + 'px'; img.style.height = 'auto'; };
+      const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); notify(); };
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    };
+  });
+}
+document.addEventListener('keydown', e => { if ((e.key==='Delete'||e.key==='Backspace') && sel) { e.preventDefault(); sel.remove(); sel=null; notify(); } });
+
+/* ---- API used from C++ ---- */
+function setContent(bodyHtml, quoteHtml){
+  ed.innerHTML = bodyHtml || '<p><br></p>';
+  if (quoteHtml) { const q = document.createElement('div'); q.id='pm-quote'; q.innerHTML = quoteHtml; ed.appendChild(q); }
+  wireImages();
+  placeCaretStart();
+}
+function insertAiBody(html){
+  const q = document.getElementById('pm-quote');
+  const quote = q ? q.outerHTML : '';
+  ed.innerHTML = html + (quote ? quote : '');
+  wireImages();
+  placeCaretStart();
+  notify();
+}
+function placeCaretStart(){ ed.focus(); const r = document.createRange(); r.setStart(ed, 0); r.collapse(true); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+function getHtml(){
+  const clone = ed.cloneNode(true);
+  clone.querySelectorAll('.pm-img').forEach(w => { const img = w.querySelector('img'); img.removeAttribute('contenteditable'); w.replaceWith(img); });
+  clone.querySelectorAll('[contenteditable]').forEach(x => x.removeAttribute('contenteditable'));
+  return clone.innerHTML;
+}
+function getPlainText(){ return ed.innerText; }
+function isEmpty(){ const q = document.getElementById('pm-quote'); const c = ed.cloneNode(true); const qq = c.querySelector('#pm-quote'); if (qq) qq.remove(); return c.innerText.trim().length === 0 && !c.querySelector('img'); }
+</script>
+</body>
+</html>

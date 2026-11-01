@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: cid: qrc:; style-src 'unsafe-inline' qrc:; script-src qrc: 'unsafe-inline'; font-src qrc: data:;">
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<style>
+/*THEME*/
+html, body { margin:0; padding:0; background: var(--surface); color: var(--text); font-family: "Segoe UI","Helvetica Neue",Arial,sans-serif; font-size:14px; }
+#root { padding: 0 0 48px 0; }
+.empty { display:flex; height:80vh; align-items:center; justify-content:center; color: var(--faint); flex-direction:column; gap:8px; }
+.empty .big { font-size:40px; }
+.subject { font-size:20px; font-weight:600; padding:18px 24px 6px; display:flex; align-items:center; gap:10px; }
+.subject .tag { font-size:11px; font-weight:700; color:#fff; border-radius:4px; padding:3px 7px; letter-spacing:.3px; }
+.notice { margin: 0 24px 10px; padding:8px 12px; background: var(--surface-alt); border:1px solid var(--border); border-radius:6px; font-size:12px; color: var(--muted); display:flex; align-items:center; gap:10px; }
+.notice button { margin-left:auto; }
+button.pm { background: var(--surface); border:1px solid var(--border); border-radius:4px; padding:4px 10px; color: var(--text); cursor:pointer; font-size:12px; }
+button.pm:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Summary card */
+.card { margin: 8px 24px 14px; border:1px solid var(--border); border-radius:8px; background: var(--surface); overflow:hidden; }
+.card-h { display:flex; align-items:center; gap:10px; padding:10px 14px; cursor:pointer; user-select:none; background: var(--surface-alt); }
+.card-h .ttl { font-weight:600; font-size:13px; }
+.card-h .spark { color: #7C3AED; font-size:15px; }
+.card-h .chev { margin-left:auto; color: var(--faint); transition: transform .15s; }
+.card.collapsed .chev { transform: rotate(-90deg); }
+.card.collapsed .card-b { display:none; }
+.card-b { padding: 12px 16px 14px; }
+ul.bullets { margin:0; padding-left:18px; list-style: square; }
+ul.bullets li { margin: 4px 0; line-height:1.45; }
+.evaluating { display:flex; align-items:center; gap:10px; color: var(--muted); }
+.dot { width:9px; height:9px; border-radius:50%; background:#A3A3A3; animation: pulse 1.2s infinite; }
+@keyframes pulse { 0%,100%{opacity:.35} 50%{opacity:1} }
+.sec-title { margin:14px 0 6px; font-size:11px; font-weight:700; letter-spacing:.6px; color: var(--muted); text-transform: uppercase; }
+.you-box { background: var(--danger-soft); border:1px solid #F3B7BF; border-radius:6px; padding:8px 12px; }
+.you-box ul, .others ul { margin:0; padding-left:18px; list-style: square; }
+.you-box li { color: var(--danger); margin:5px 0; }
+.you-box li::marker { color: var(--danger); }
+.others { margin-top:8px; }
+.others li { color: var(--muted); margin:5px 0; }
+.others li::marker { color: var(--faint); }
+.act { display:flex; align-items:flex-start; gap:8px; }
+.act .txt { flex:1; line-height:1.4; }
+.act.done .txt { text-decoration: line-through; opacity:.55; }
+.pill-you { display:inline-block; background: var(--danger); color:#fff; font-weight:800; font-size:10px; border-radius:10px; padding:2px 7px; letter-spacing:.5px; vertical-align: middle; margin-right:4px; }
+.act select { font-size:11px; border:1px solid var(--border); border-radius:4px; background: var(--surface); color: var(--text); padding:2px 4px; max-width:190px; }
+.owner { color: var(--faint); font-size:12px; margin-left:4px; }
+
+/* Messages */
+.msg { margin: 0 24px 10px; border:1px solid var(--border); border-radius:8px; background: var(--surface); overflow:hidden; }
+.msg-h { display:flex; align-items:flex-start; gap:12px; padding:12px 16px; cursor:pointer; }
+.msg-h:hover { background: var(--surface-alt); }
+.avatar { width:36px; height:36px; border-radius:50%; background: var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; flex-shrink:0; }
+.hmeta { flex:1; min-width:0; }
+.from { font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.from .email { font-weight:400; color: var(--muted); font-size:12px; }
+.to { color: var(--muted); font-size:12px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.preview { color: var(--faint); font-size:12px; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hright { display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex-shrink:0; }
+.date { color: var(--muted); font-size:12px; white-space:nowrap; }
+.pill-att { display:inline-flex; align-items:center; gap:5px; background: var(--accent); color:#fff; font-weight:700; font-size:11px; border-radius:11px; padding:3px 9px; }
+.pill-draft { display:inline-flex; align-items:center; gap:5px; background: var(--danger); color:#fff; font-weight:700; font-size:11px; border-radius:11px; padding:4px 10px; cursor:pointer; border:none; }
+.msg.collapsed .msg-b { display:none; }
+.msg-b { padding: 4px 16px 16px; }
+.body { line-height:1.5; overflow-wrap:anywhere; }
+.body img { max-width:100%; height:auto; }
+.body table { max-width:100%; }
+.body blockquote { border-left:3px solid var(--border); margin:8px 0; padding-left:10px; color: var(--muted); }
+.plain { white-space: pre-wrap; font-family: "Segoe UI","Helvetica Neue",Arial,sans-serif; }
+.pm-pill { display:inline-block; margin:8px 0; background: var(--surface-alt); border:1px solid var(--border); border-radius:10px; padding:0 10px; color: var(--muted); cursor:pointer; letter-spacing:2px; font-weight:700; font-size:13px; line-height:18px; }
+.pm-pill:hover { border-color: var(--accent); color: var(--accent); }
+.pm-hidden { display:none; }
+.atts { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+.att { display:flex; align-items:center; gap:8px; border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:12px; cursor:pointer; background: var(--surface-alt); }
+.att:hover { border-color: var(--accent); }
+.att .sz { color: var(--faint); }
+.cal { margin-top:12px; padding:10px 12px; border-radius:6px; background: var(--accent-soft); border:1px solid var(--border); font-size:13px; display:flex; align-items:center; gap:10px; }
+</style>
+</head>
+<body>
+<div id="root"><div class="empty"><div class="big">✉</div><div>Select a message to read</div></div></div>
+<script>
+let bridge = null;
+let state = null;
+let summaryCollapsed = false;
+const expanded = new Set();
+
+new QWebChannel(qt.webChannelTransport, ch => {
+  bridge = ch.objects.bridge;
+  bridge.dataChanged.connect(json => render(JSON.parse(json)));
+  bridge.cidReady.connect((msgId, cid, dataUrl) => {
+    document.querySelectorAll(`[data-msg="${msgId}"] img`).forEach(img => {
+      const src = img.getAttribute('data-cid') || img.getAttribute('src') || '';
+      if (src === 'cid:' + cid || src === cid) img.src = dataUrl;
+    });
+  });
+  bridge.ready();
+});
+
+function esc(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtSize(n){ if(!n) return ''; if(n<1024) return n+' B'; if(n<1048576) return (n/1024).toFixed(0)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
+function initials(name,email){ const s=(name||email||'?').trim(); const p=s.split(/\s+/); return (p.length>1 ? p[0][0]+p[p.length-1][0] : s.slice(0,2)).toUpperCase(); }
+const TAGC = {Action:'#F59E0B', FollowUp:'#7C3AED', Waiting:'#64748B', Info:'#0F6CBD', Done:'#16A34A', Evaluating:'#A3A3A3'};
+const TAGL = {Action:'ACTION', FollowUp:'FOLLOW-UP', Waiting:'WAITING', Info:'INFO', Done:'DONE', Evaluating:'EVALUATING'};
+const STATUSES = [['not_started','Not Started'],['on_hold','On Hold'],['in_progress','In Progress'],['awaiting','Awaiting Someone / Delegated'],['completed','Completed'],['ignore','Ignore']];
+
+function render(data){
+  state = data;
+  const root = document.getElementById('root');
+  if(!data || !data.messages || !data.messages.length){
+    root.innerHTML = '<div class="empty"><div class="big">✉</div><div>Select a message to read</div></div>'; return;
+  }
+  if (data.resetExpanded) { expanded.clear(); }
+  let h = '';
+  const tag = data.triage && data.triage.tag || 'Evaluating';
+  h += `<div class="subject"><span class="tag" style="background:${TAGC[tag]}">${TAGL[tag]}${tag==='Action'&&data.triage.count>1?' ×'+data.triage.count:''}</span><span>${esc(data.subject||'(no subject)')}</span></div>`;
+  if (data.remoteBlocked) h += `<div class="notice">🔒 Remote images are blocked to prevent tracking. <button class="pm" onclick="bridge.loadRemoteImages()">Load images</button></div>`;
+  h += renderSummary(data);
+  const msgs = data.messages.slice().reverse(); // newest first
+  const multi = msgs.length > 1;
+  msgs.forEach((m, i) => {
+    const open = !multi || expanded.has(m.id) || (expanded.size===0 && i===0 && !data.collapseAll);
+    h += renderMessage(m, open, data);
+  });
+  root.innerHTML = h;
+  root.querySelectorAll('.body').forEach(collapseQuotes);
+  if (bridge) root.querySelectorAll('.body img[data-cid]').forEach(img => bridge.requestCid(img.closest('.msg').dataset.msg, img.dataset.cid));
+}
+
+function renderSummary(d){
+  const s = d.summary || {state:'none'};
+  let body = '';
+  if (s.state === 'evaluating') body = `<div class="evaluating"><span class="dot"></span>Summarising conversation…</div>`;
+  else if (s.state === 'error') body = `<div class="evaluating">⚠ ${esc(s.error||'Summary unavailable')} <button class="pm" onclick="bridge.retrySummary()">Retry</button></div>`;
+  else if (s.state === 'nokey') body = `<div class="evaluating">Add a Claude API key in Settings → Account to enable AI summaries.</div>`;
+  else if (s.state === 'ready') {
+    body += '<ul class="bullets">' + (s.bullets||[]).slice(0,5).map(b=>`<li>${esc(b)}</li>`).join('') + '</ul>';
+    const you = (s.actions||[]).filter(a=>a.forUser), others = (s.actions||[]).filter(a=>!a.forUser);
+    if (you.length || others.length) {
+      body += '<div class="sec-title">Actions &amp; Responses</div>';
+      if (you.length) body += `<div class="you-box"><ul>${you.map(a=>actionRow(a,true)).join('')}</ul></div>`;
+      if (others.length) body += `<div class="others"><ul>${others.map(a=>actionRow(a,false)).join('')}</ul></div>`;
+    }
+  } else body = `<div class="evaluating">No summary yet.</div>`;
+  return `<div class="card ${summaryCollapsed?'collapsed':''}" id="card"><div class="card-h" onclick="toggleCard()"><span class="spark">✦</span><span class="ttl">AI Summary</span><span class="chev">▾</span></div><div class="card-b">${body}</div></div>`;
+}
+function actionRow(a, you){
+  const done = a.status==='completed' || a.status==='ignore';
+  const opts = STATUSES.map(([k,l])=>`<option value="${k}" ${a.status===k?'selected':''}>${l}</option>`).join('');
+  return `<li><div class="act ${done?'done':''}" data-hash="${a.hash}"><div class="txt">${you?'<span class="pill-you">YOU</span>':''}${esc(a.text)}${!you&&a.owner?`<span class="owner">— ${esc(a.owner)}</span>`:''}</div><select onchange="setStatus('${a.hash}', this.value, this)">${opts}</select></div></li>`;
+}
+function setStatus(hash, value, sel){
+  const a = (state.summary.actions||[]).find(x=>x.hash===hash); if(!a) return;
+  a.status = value;
+  sel.closest('.act').classList.toggle('done', value==='completed'||value==='ignore');
+  if (bridge) bridge.setActionStatus(state.threadId, hash, a.text, value);
+}
+function toggleCard(){ summaryCollapsed = !summaryCollapsed; document.getElementById('card').classList.toggle('collapsed', summaryCollapsed); }
+
+function renderMessage(m, open, d){
+  const atts = (m.attachments||[]).filter(a=>!a.inline && a.filename);
+  const to = (m.to||[]).map(a=>a.name||a.email).join(', ');
+  const cc = (m.cc||[]).map(a=>a.name||a.email).join(', ');
+  let h = `<div class="msg ${open?'':'collapsed'}" data-msg="${m.id}" id="m-${m.id}">`;
+  h += `<div class="msg-h" onclick="toggleMsg('${m.id}')">`;
+  h += `<div class="avatar">${esc(initials(m.from.name, m.from.email))}</div>`;
+  h += `<div class="hmeta"><div class="from"><span>${esc(m.from.name||m.from.email)}</span><span class="email">&lt;${esc(m.from.email)}&gt;</span>${m.unread?'<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></span>':''}</div>`;
+  h += `<div class="to">To: ${esc(to)}${cc?' &nbsp; Cc: '+esc(cc):''}</div>`;
+  if(!open) h += `<div class="preview">${esc(m.snippet||'')}</div>`;
+  h += `</div><div class="hright"><span class="date">${esc(m.date)}</span>`;
+  if (atts.length) h += `<span class="pill-att">📎 ${atts.length}</span>`;
+  if (m.isDraft) h += `<button class="pill-draft" onclick="event.stopPropagation(); bridge.editDraft('${m.id}')">✎ Edit draft</button>`;
+  h += `</div></div>`;
+  h += `<div class="msg-b"><div class="body ${m.plain?'plain':''}" data-plain="${m.plain?1:0}">${m.html}</div>`;
+  if (m.calendar) h += `<div class="cal">📅 This message contains a calendar invitation.</div>`;
+  if (atts.length) h += `<div class="atts">${atts.map(a=>`<div class="att" onclick="bridge.openAttachment('${m.id}','${a.attachmentId}','${esc(a.filename)}')">📄 <span>${esc(a.filename)}</span><span class="sz">${fmtSize(a.size)}</span></div>`).join('')}</div>`;
+  h += `</div></div>`;
+  return h;
+}
+function toggleMsg(id){
+  const el = document.getElementById('m-'+id); if(!el) return;
+  const wasCollapsed = el.classList.contains('collapsed');
+  el.classList.toggle('collapsed');
+  if (wasCollapsed) expanded.add(id); else expanded.delete(id);
+  render(state);
+}
+
+/* Quote + signature collapsing behind "···" pills */
+function makePill(targets){
+  const pill = document.createElement('span'); pill.className='pm-pill'; pill.textContent='···'; pill.title='Show trimmed content';
+  pill.onclick = () => { targets.forEach(t=>t.classList.toggle('pm-hidden')); };
+  return pill;
+}
+function collapseQuotes(body){
+  // Structured quotes (Gmail/Outlook/Apple Mail)
+  const sel = '.gmail_quote, blockquote[type="cite"], #divRplyFwdMsg, .yahoo_quoted, div[id^="appendonsend"], .moz-cite-prefix, .OutlookMessageHeader';
+  const nodes = Array.from(body.querySelectorAll(sel));
+  let did = false;
+  nodes.forEach(n => {
+    if (n.closest('.pm-hidden')) return;
+    let group = [n];
+    let sib = n.nextElementSibling;
+    while (sib) { group.push(sib); sib = sib.nextElementSibling; }  // everything after the header is quoted
+    if (n.tagName === 'BLOCKQUOTE' || n.classList.contains('gmail_quote')) group = [n];
+    group.forEach(g => g.classList.add('pm-hidden'));
+    n.parentNode.insertBefore(makePill(group), n);
+    did = true;
+  });
+  if (body.dataset.plain === '1') {
+    const text = body.textContent;
+    const re = /(^|\n)\s*(On .{5,160}?wrote:|-{2,}\s*Original Message\s*-{2,}|From:\s.+\n(?:Sent|Date):\s.+)/s;
+    const sig = /(^|\n)--\s*(\n|$)/;
+    let cut = -1, m;
+    if ((m = re.exec(text))) cut = m.index;
+    if (cut < 0 && (m = sig.exec(text))) cut = m.index;
+    if (cut > 0) {
+      const head = text.slice(0, cut), tail = text.slice(cut);
+      body.textContent = '';
+      body.appendChild(document.createTextNode(head));
+      const span = document.createElement('div'); span.className='pm-hidden'; span.textContent = tail;
+      body.appendChild(document.createElement('br'));
+      body.appendChild(makePill([span]));
+      body.appendChild(span);
+    }
+  }
+}
+</script>
+</body>
+</html>

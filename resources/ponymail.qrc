@@ -1,0 +1,8 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/">
+    <file>reading.html</file>
+    <file>compose.html</file>
+    <file alias="icons/ponymail.png">ponymail.png</file>
+  </qresource>
+</RCC>

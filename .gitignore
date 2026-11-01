@@ -1,0 +1,8 @@
+build/
+build-*/
+dist/
+installer/out/
+*.user
+.vs/
+.vscode/
+CMakeLists.txt.user

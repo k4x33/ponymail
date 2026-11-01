@@ -1,0 +1,97 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  QT_VERSION: "6.8.3"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt ${{ env.QT_VERSION }} (MSVC 2022 x64 + WebEngine)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtwebengine qtwebchannel qtpositioning
+          cache: true
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja
+        run: choco install ninja --no-progress -y
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPONYMAIL_BUILD_TESTS=ON
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Unit tests
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          & "build\ponymail_tests.exe"
+          if ($LASTEXITCODE -ne 0) { throw "tests failed" }
+
+      - name: Stage runtime (windeployqt + CRT)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item build\PonyMail.exe dist\
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-translations --no-opengl-sw dist\PonyMail.exe
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+          # App-local VC++ runtime so the per-user installer needs no admin rights.
+          $crt = Join-Path $env:VCToolsRedistDir "x64\Microsoft.VC143.CRT"
+          Copy-Item "$crt\*.dll" dist\ -Force
+          Get-ChildItem dist | Measure-Object | Select-Object -ExpandProperty Count
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          if ("${{ github.ref_type }}" -ne "tag") { $version = "1.0.0-dev.${{ github.run_number }}" }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$version /DSourceDir="$PWD\dist" installer\ponymail.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-ChildItem installer\out
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PonyMail-Setup-win64
+          path: installer/out/*.exe
+          if-no-files-found: error
+
+      - name: Upload portable folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: PonyMail-portable-win64
+          path: dist/
+
+      - name: GitHub release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/out/*.exe
+          generate_release_notes: true
