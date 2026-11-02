@@ -84,6 +84,7 @@ let bridge = null;
 let state = null;
 let summaryCollapsed = false;
 const expanded = new Set();
+let lastThreadId = null;
 
 new QWebChannel(qt.webChannelTransport, ch => {
   bridge = ch.objects.bridge;
@@ -97,6 +98,7 @@ new QWebChannel(qt.webChannelTransport, ch => {
   bridge.ready();
 });
 
+function decodeEntities(s){ const t = document.createElement('textarea'); t.innerHTML = s || ''; return t.value; }
 function esc(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtSize(n){ if(!n) return ''; if(n<1024) return n+' B'; if(n<1048576) return (n/1024).toFixed(0)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
 function initials(name,email){ const s=(name||email||'?').trim(); const p=s.split(/\s+/); return (p.length>1 ? p[0][0]+p[p.length-1][0] : s.slice(0,2)).toUpperCase(); }
@@ -110,7 +112,12 @@ function render(data){
   if(!data || !data.messages || !data.messages.length){
     root.innerHTML = '<div class="empty"><div class="big">✉</div><div>Select a message to read</div></div>'; return;
   }
-  if (data.resetExpanded) { expanded.clear(); }
+  if (data.resetExpanded || data.threadId !== lastThreadId) {
+    // New thread: multi-message threads start collapsed except the newest message.
+    expanded.clear();
+    if (data.messages.length > 1) expanded.add(data.messages[data.messages.length - 1].id);
+    lastThreadId = data.threadId;
+  }
   let h = '';
   const tag = data.triage && data.triage.tag || 'Evaluating';
   h += `<div class="subject"><span class="tag" style="background:${TAGC[tag]}">${TAGL[tag]}${tag==='Action'&&data.triage.count>1?' ×'+data.triage.count:''}</span><span>${esc(data.subject||'(no subject)')}</span></div>`;
@@ -118,7 +125,7 @@ function render(data){
   const msgs = data.messages.slice().reverse(); // newest first
   const multi = msgs.length > 1;
   msgs.forEach((m, i) => {
-    const open = !multi || expanded.has(m.id) || (expanded.size===0 && i===0 && !data.collapseAll);
+    const open = !multi || expanded.has(m.id);
     h += renderMessage(m, open, data);
   });
   root.innerHTML = h;
@@ -165,7 +172,7 @@ function renderMessage(m, open, d){
   h += `<div class="avatar">${esc(initials(m.from.name, m.from.email))}</div>`;
   h += `<div class="hmeta"><div class="from"><span>${esc(m.from.name||m.from.email)}</span><span class="email">&lt;${esc(m.from.email)}&gt;</span>${m.unread?'<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></span>':''}</div>`;
   h += `<div class="to">To: ${esc(to)}${cc?' &nbsp; Cc: '+esc(cc):''}</div>`;
-  if(!open) h += `<div class="preview">${esc(m.snippet||'')}</div>`;
+  if(!open) h += `<div class="preview">${esc(decodeEntities(m.snippet||''))}</div>`;
   h += `</div><div class="hright"><span class="date">${esc(m.date)}</span>`;
   if (atts.length) h += `<span class="pill-att">📎 ${atts.length}</span>`;
   if (m.isDraft) h += `<button class="pill-draft" onclick="event.stopPropagation(); bridge.editDraft('${m.id}')">✎ Edit draft</button>`;
@@ -177,10 +184,7 @@ function renderMessage(m, open, d){
   return h;
 }
 function toggleMsg(id){
-  const el = document.getElementById('m-'+id); if(!el) return;
-  const wasCollapsed = el.classList.contains('collapsed');
-  el.classList.toggle('collapsed');
-  if (wasCollapsed) expanded.add(id); else expanded.delete(id);
+  if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
   render(state);
 }
 
