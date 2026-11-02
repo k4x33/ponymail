@@ -21,6 +21,26 @@ MessageListView::MessageListView(QWidget* parent) : QListView(parent), m_delegat
     verticalScrollBar()->setSingleStep(24);
 }
 
+void MessageListView::setModel(QAbstractItemModel* m)
+{
+    QListView::setModel(m);
+    if (!m) return;
+    connect(m, &QAbstractItemModel::layoutAboutToBeChanged, this, [this]() {
+        m_anchorIndex = currentIndex();
+        m_anchorTop = m_anchorIndex.isValid() ? visualRect(m_anchorIndex).top() : -1;
+    });
+    connect(m, &QAbstractItemModel::layoutChanged, this, [this]() {
+        if (m_anchorTop >= 0 && m_anchorIndex.isValid()) {
+            // Scroll so the selected row stays exactly where the eye left it.
+            const int newTop = visualRect(m_anchorIndex).top();
+            verticalScrollBar()->setValue(verticalScrollBar()->value() + (newTop - m_anchorTop));
+        }
+        m_anchorTop = -1;
+        viewport()->update();
+        emitVisible();
+    });
+}
+
 void MessageListView::setTheme(const Theme& t) { m_delegate->setTheme(t); viewport()->update(); }
 
 QStringList MessageListView::selectedThreadIds() const

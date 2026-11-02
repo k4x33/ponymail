@@ -1,6 +1,7 @@
 #pragma once
 #include "MessageListDelegate.h"
 #include <QListView>
+#include <QPersistentModelIndex>
 
 namespace ponymail {
 
@@ -14,6 +15,7 @@ public:
     explicit MessageListView(QWidget* parent = nullptr);
     void setTheme(const Theme& t);
     MessageListDelegate* rowDelegate() const { return m_delegate; }
+    void setModel(QAbstractItemModel* m) override;
 
     QStringList selectedThreadIds() const;
     void animateRemove(const QString& threadId, std::function<void()> done);
@@ -39,6 +41,8 @@ protected:
 private:
     void emitVisible();
     MessageListDelegate* m_delegate;
+    int m_anchorTop = -1;
+    QPersistentModelIndex m_anchorIndex;
 };
 
 } // namespace ponymail

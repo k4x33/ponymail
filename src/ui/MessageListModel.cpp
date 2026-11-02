@@ -77,8 +77,6 @@ bool MessageListModel::passesFilter(const Thread& t) const
 
 void MessageListModel::rebuild()
 {
-    beginResetModel();
-    m_rows.clear();
     QList<const Thread*> threads = m_store->threadsInFolder(m_folderKey);
     QList<const Thread*> kept;
     for (const Thread* t : threads) if (passesFilter(*t)) kept << t;
@@ -89,8 +87,28 @@ void MessageListModel::rebuild()
             return m_resolver.displaySender(*a).localeAwareCompare(m_resolver.displaySender(*b)) < 0; });
     else
         std::stable_sort(kept.begin(), kept.end(), [](const Thread* a, const Thread* b) { return a->latestDate() > b->latestDate(); });
-    for (const Thread* t : kept) m_rows << t->id;
-    endResetModel();
+    QStringList newRows;
+    for (const Thread* t : kept) newRows << t->id;
+
+    if (newRows == m_rows) {
+        if (!m_rows.isEmpty()) Q_EMIT dataChanged(index(0), index(m_rows.size() - 1));
+        Q_EMIT rebuilt();
+        return;
+    }
+
+    // Layout change (not a reset) so the selection model's persistent indexes follow their threads.
+    Q_EMIT layoutAboutToBeChanged({}, QAbstractItemModel::VerticalSortHint);
+    const QModelIndexList oldPersistent = persistentIndexList();
+    const QStringList oldRows = m_rows;
+    m_rows = newRows;
+    QModelIndexList newPersistent;
+    for (const QModelIndex& oldIdx : oldPersistent) {
+        const QString id = oldIdx.row() >= 0 && oldIdx.row() < oldRows.size() ? oldRows[oldIdx.row()] : QString();
+        const int newRow = id.isEmpty() ? -1 : m_rows.indexOf(id);
+        newPersistent << (newRow >= 0 ? index(newRow) : QModelIndex());
+    }
+    changePersistentIndexList(oldPersistent, newPersistent);
+    Q_EMIT layoutChanged({}, QAbstractItemModel::VerticalSortHint);
     Q_EMIT rebuilt();
 }
 
