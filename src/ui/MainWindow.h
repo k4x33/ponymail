@@ -73,6 +73,7 @@ private:
     Theme m_theme = Theme::light();
     Folder m_folderBeforeSearch;
     bool m_inSearch = false;
+    QString m_syncState;
     QElapsedTimer m_lastFocusSync;
     QHash<QString, QString> m_draftIdByMessage;
 };

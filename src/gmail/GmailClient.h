@@ -5,6 +5,9 @@
 #include <QStringList>
 #include <QNetworkAccessManager>
 #include <QUrlQuery>
+#include <QTimer>
+#include <QList>
+#include <QPair>
 #include <functional>
 
 namespace ponymail {
@@ -22,6 +25,14 @@ public:
     using BytesCallback = std::function<void(const QByteArray& data, int status, const QString& error)>;
 
     explicit GmailClient(OAuthManager* auth, QNetworkAccessManager* nam, QObject* parent = nullptr);
+
+    // Client-side quota governor: every call is charged its Gmail quota units and
+    // queued when the sliding 60 s window would exceed the budget. Default 5,400
+    // (90% of the project's 6,000 units/min/user limit).
+    void setQuotaBudget(int unitsPerMinute);
+    int quotaBudget() const { return m_budget; }
+    int unitsUsedLastMinute() const;
+    int queuedRequests() const { return m_interactive.size() + m_background.size(); }
 
     // Profile / labels
     void getProfile(JsonCallback cb);
@@ -62,6 +73,8 @@ public:
     void listHistory(const QString& startHistoryId, const QString& pageToken, JsonCallback cb);
 
 Q_SIGNALS:
+    void quotaUsage(int unitsUsed, int budget);
+    void quotaThrottled(int unitsUsed, int budget, int queued);
     void rateLimited(int status);
     void requestSucceeded();
     void authExpired();
@@ -72,8 +85,15 @@ private:
     void rawRequest(const QByteArray& verb, const QString& path, const QUrlQuery& query,
                     const QByteArray& body, const QByteArray& contentType, BytesCallback cb, int attempt);
 
+    void pump();
+
+    struct Pending { int cost = 0; std::function<void()> fn; };
     OAuthManager* m_auth;
     QNetworkAccessManager* m_nam;
+    int m_budget = 5400;
+    QList<QPair<qint64, int>> m_ledger;   // (timestamp ms, units) within the last minute
+    QList<Pending> m_interactive, m_background;
+    QTimer m_pumpTimer;
 };
 
 } // namespace ponymail

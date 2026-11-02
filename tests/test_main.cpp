@@ -5,6 +5,10 @@
 #include "gmail/MimeBuilder.h"
 #include "storage/Database.h"
 #include "ai/ClaudeClient.h"
+#include "gmail/GmailClient.h"
+#include "auth/OAuthManager.h"
+#include "core/Settings.h"
+#include <QNetworkAccessManager>
 #include "core/Util.h"
 #include <QTemporaryDir>
 
@@ -237,6 +241,26 @@ private Q_SLOTS:
         const QJsonObject u = ClaudeClient::parseJsonObject(QStringLiteral("{\"bullets\":[\"see https://x.y/path // not a comment\"],\"actions\":[],\"follow_up\":false}"), &err);
         QCOMPARE(u.value(QStringLiteral("bullets")).toArray().first().toString(), QStringLiteral("see https://x.y/path // not a comment"));
         QVERIFY(ClaudeClient::parseJsonObject(QStringLiteral("I cannot summarise this."), &err).isEmpty());
+    }
+
+    // ---------------- Gmail quota governor ----------------
+    void quota_governor_paces_requests()
+    {
+        Settings settings;
+        QNetworkAccessManager nam;
+        OAuthManager auth(&settings, &nam);
+        GmailClient gmail(&auth, &nam);
+        gmail.setQuotaBudget(1000);
+        int dispatched = 0;
+        // 150 thread fetches × 10 units = 1,500 units > 1,000 budget: the excess must queue, not fire.
+        for (int i = 0; i < 150; ++i)
+            gmail.getThread(QStringLiteral("t%1").arg(i), [&dispatched](const QJsonObject&, int, const QString&) { ++dispatched; });
+        QCoreApplication::processEvents();
+        QVERIFY2(gmail.queuedRequests() >= 50, qPrintable(QString::number(gmail.queuedRequests())));
+        QVERIFY(gmail.unitsUsedLastMinute() <= 1000);
+        // Interactive calls jump the background queue even when the window is nearly full.
+        gmail.getProfile([](const QJsonObject&, int, const QString&) {});
+        QVERIFY(gmail.unitsUsedLastMinute() <= 1001);
     }
 
     // ---------------- SQLite storage ----------------

@@ -341,7 +341,15 @@ void MainWindow::connectSignals()
     connect(m_sync, &SyncEngine::statusMessage, this, [this](const QString& m) { showStatus(m); });
     connect(m_sync, &SyncEngine::errorOccurred, this, [this](const QString& m) { showStatus(QStringLiteral("⚠ ") + m, 10000); });
     connect(m_sync, &SyncEngine::syncStateChanged, this, [this](bool syncing, bool limited) {
-        m_syncLabel->setText(limited ? QStringLiteral("Rate limited · 120 s polling") : syncing ? QStringLiteral("Syncing…") : QStringLiteral("Up to date · 30 s polling"));
+        m_syncState = limited ? QStringLiteral("Rate limited · 120 s polling") : syncing ? QStringLiteral("Syncing…") : QStringLiteral("Up to date · 30 s polling");
+        m_syncLabel->setText(m_syncState);
+    });
+    connect(m_gmail, &GmailClient::quotaUsage, this, [this](int used, int budget) {
+        if (used * 2 >= budget) m_syncLabel->setText(QStringLiteral("%1 · Gmail quota %2/%3 units").arg(m_syncState).arg(used).arg(budget));
+        else m_syncLabel->setText(m_syncState);
+    });
+    connect(m_gmail, &GmailClient::quotaThrottled, this, [this](int used, int budget, int queued) {
+        m_syncLabel->setText(QStringLiteral("Pacing Gmail requests · %1/%2 units · %3 queued").arg(used).arg(budget).arg(queued));
     });
     connect(m_sync, &SyncEngine::folderLoading, this, [this](const QString& key, bool loading) {
         if (key == m_model->folderKey() && loading && m_model->rowCount() == 0) m_listTitle->setText(m_sync->activeFolder().title + QStringLiteral("  …"));

@@ -14,7 +14,7 @@ namespace ponymail {
 namespace {
 constexpr int kPollNormalMs = 30'000;
 constexpr int kPollBackoffMs = 120'000;
-constexpr int kPageSize = 50;
+constexpr int kPageSize = 30;
 constexpr int kMaxParallelThreadFetches = 3;
 constexpr int kRateLimitPauseMs = 20'000;
 }
