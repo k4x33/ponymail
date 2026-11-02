@@ -1,6 +1,6 @@
 # PonyMail
 
-Native Windows 11 desktop email client for Gmail. C++17 / Qt 6 (Widgets + WebEngine). Talks directly to the Gmail REST API over OAuth 2.0 + PKCE and to the Claude API for thread summaries, triage and drafting. No intermediary servers, no telemetry, no read receipts, no tracking pixels.
+Native Windows 11 desktop email client for Gmail. C++17 / Qt 6 (Widgets + WebEngine). Talks directly to the Gmail REST API over OAuth 2.0 + PKCE and to the Claude API for thread summaries, triage and drafting. No intermediary servers, no telemetry, no read receipts.
 
 ## Install
 
@@ -55,6 +55,7 @@ Settings gear → **Account & AI** holds the Claude API key, model and display n
 | `S` | Star |
 | `Ctrl+R` / `Ctrl+Shift+R` / `Ctrl+F` | Reply / Reply all / Forward |
 | `Ctrl+E` | Focus search |
+| `Ctrl++` / `Ctrl+-` / `Ctrl+0`, Ctrl+wheel | Reading pane text size (persisted) |
 | `Ctrl+Enter` | Send (composer) |
 | `F5` | Sync now |
 

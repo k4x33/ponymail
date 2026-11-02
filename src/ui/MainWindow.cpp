@@ -106,9 +106,27 @@ void MainWindow::buildUi()
     m_aiA = mk(QStringLiteral("wand"), QStringLiteral("Write with AI"), QStringLiteral("Write / Reply / Forward with AI"));
     auto* spacer = new QWidget(tb); spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     tb->addWidget(spacer);
+    QAction* zoomOutA = tb->addAction(QStringLiteral("A\u2212"));
+    zoomOutA->setToolTip(QStringLiteral("Smaller text in reading pane (Ctrl+-)"));
+    zoomOutA->setShortcut(QKeySequence::ZoomOut);
+    QAction* zoomInA = tb->addAction(QStringLiteral("A+"));
+    zoomInA->setToolTip(QStringLiteral("Larger text in reading pane (Ctrl++)"));
+    zoomInA->setShortcuts({QKeySequence::ZoomIn, QKeySequence(Qt::CTRL | Qt::Key_Equal)});
+    QAction* zoomResetA = new QAction(QStringLiteral("Reset text size"), this);
+    zoomResetA->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
+    addAction(zoomResetA);
+    m_zoomLabel = new QLabel(tb);
+    m_zoomLabel->setProperty("muted", true);
+    m_zoomLabel->setMinimumWidth(42);
+    m_zoomLabel->setAlignment(Qt::AlignCenter);
+    tb->addWidget(m_zoomLabel);
+    tb->addSeparator();
     m_syncLabel = new QLabel(tb);
     m_syncLabel->setProperty("muted", true);
     tb->addWidget(m_syncLabel);
+    connect(zoomOutA, &QAction::triggered, this, [this]() { m_reading->zoomOut(); });
+    connect(zoomInA, &QAction::triggered, this, [this]() { m_reading->zoomIn(); });
+    connect(zoomResetA, &QAction::triggered, this, [this]() { m_reading->zoomReset(); });
     QAction* refreshA = mk(QStringLiteral("refresh"), QString(), QStringLiteral("Sync now (F5)"));
     refreshA->setShortcut(QKeySequence::Refresh);
 
@@ -239,6 +257,12 @@ void MainWindow::buildUi()
     cl->addWidget(m_list, 1);
 
     m_reading = new ReadingPane(m_store, m_db, m_gmail, m_queue, m_ai, m_splitter);
+    m_reading->setZoom(m_settings->readingZoom());
+    m_zoomLabel->setText(QStringLiteral("%1%").arg(qRound(m_reading->zoom() * 100)));
+    connect(m_reading, &ReadingPane::zoomChanged, this, [this](qreal z) {
+        m_settings->setReadingZoom(z);
+        m_zoomLabel->setText(QStringLiteral("%1%").arg(qRound(z * 100)));
+    });
 
     m_splitter->addWidget(m_nav);
     m_splitter->addWidget(center);

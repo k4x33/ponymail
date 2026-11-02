@@ -50,6 +50,8 @@ QByteArray Settings::windowGeometry() const { return QByteArray::fromBase64(str(
 void Settings::setWindowGeometry(const QByteArray& g) { set("window_geometry", QString::fromLatin1(g.toBase64())); }
 QByteArray Settings::windowState() const { return QByteArray::fromBase64(str("window_state").toLatin1()); }
 void Settings::setWindowState(const QByteArray& s) { set("window_state", QString::fromLatin1(s.toBase64())); }
+qreal Settings::readingZoom() const { return m_obj.value(QStringLiteral("reading_zoom")).toDouble(1.0); }
+void Settings::setReadingZoom(qreal z) { set("reading_zoom", z); }
 int Settings::splitterListWidth() const { return m_obj.value(QStringLiteral("splitter_list_width")).toInt(420); }
 void Settings::setSplitterListWidth(int px) { set("splitter_list_width", px); }
 

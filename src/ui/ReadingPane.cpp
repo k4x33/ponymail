@@ -9,7 +9,6 @@
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
 #include <QWebEngineSettings>
-#include <QWebEngineUrlRequestInfo>
 #include <QWebEngineNewWindowRequest>
 #include <QWebChannel>
 #include <QVBoxLayout>
@@ -23,15 +22,10 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QUrl>
+#include <QWheelEvent>
+#include <QChildEvent>
 
 namespace ponymail {
-
-void RemoteBlocker::interceptRequest(QWebEngineUrlRequestInfo& info)
-{
-    const QString scheme = info.requestUrl().scheme();
-    if (scheme == QLatin1String("qrc") || scheme == QLatin1String("data") || scheme == QLatin1String("blob")) return;
-    if (!allowRemote) info.block(true);
-}
 
 namespace {
 // Link clicks inside a message open in the system browser; the pane itself never navigates.
@@ -57,8 +51,6 @@ ReadingPane::ReadingPane(MailStore* store, Database* db, GmailClient* gmail, Sum
     layout->addWidget(m_view);
 
     auto* profile = new QWebEngineProfile(this);   // off-the-record: nothing persisted to disk
-    m_blocker = new RemoteBlocker(this);
-    profile->setUrlRequestInterceptor(m_blocker);
     profile->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
     profile->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
     profile->settings()->setAttribute(QWebEngineSettings::PluginsEnabled, false);
@@ -82,7 +74,6 @@ ReadingPane::ReadingPane(MailStore* store, Database* db, GmailClient* gmail, Sum
         m_store->setStatuses(threadId, m_db->actionStatusesForThread(threadId));   // instantly re-triages the row
     });
     connect(m_bridge, &ReadingBridge::editDraftRequested, this, [this](const QString& messageId) { Q_EMIT editDraftRequested(m_threadId, messageId); });
-    connect(m_bridge, &ReadingBridge::loadRemoteRequested, this, [this]() { m_remoteAllowed.insert(m_threadId); refresh(); });
     connect(m_bridge, &ReadingBridge::retrySummaryRequested, this, [this]() { m_summaryError.clear(); m_queue->invalidate(m_threadId); m_queue->enqueueFront(m_threadId); refresh(); });
     connect(m_bridge, &ReadingBridge::attachmentRequested, this, [this](const QString& messageId, const QString& attachmentId, const QString& filename) {
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
@@ -119,7 +110,38 @@ ReadingPane::ReadingPane(MailStore* store, Database* db, GmailClient* gmail, Sum
     connect(m_store, &MailStore::threadChanged, this, [this](const QString& id) { if (id == m_threadId) refresh(); });
     connect(m_queue, &SummaryQueue::summaryFailed, this, [this](const QString& id, const QString& err) { if (id == m_threadId) { m_summaryError = err; refresh(); } });
 
+    // Ctrl+wheel zoom: WebEngine delivers wheel events to its focus proxy child.
+    m_view->installEventFilter(this);
+    connect(m_view, &QWebEngineView::loadFinished, this, [this](bool) { if (m_view->focusProxy()) m_view->focusProxy()->installEventFilter(this); });
+
     setTheme(m_theme);
+}
+
+qreal ReadingPane::zoom() const { return m_view->zoomFactor(); }
+
+void ReadingPane::setZoom(qreal z)
+{
+    z = qBound(0.5, z, 2.5);
+    z = qRound(z * 20.0) / 20.0;   // 5% steps
+    if (qFuzzyCompare(z, m_view->zoomFactor())) return;
+    m_view->setZoomFactor(z);
+    Q_EMIT zoomChanged(z);
+}
+
+bool ReadingPane::eventFilter(QObject* o, QEvent* e)
+{
+    if (e->type() == QEvent::Wheel) {
+        auto* we = static_cast<QWheelEvent*>(e);
+        if (we->modifiers() & Qt::ControlModifier) {
+            if (we->angleDelta().y() > 0) zoomIn(); else if (we->angleDelta().y() < 0) zoomOut();
+            return true;
+        }
+    } else if (e->type() == QEvent::ChildAdded) {
+        // New render widget: make sure it is filtered too.
+        auto* ce = static_cast<QChildEvent*>(e);
+        if (ce->child() && ce->child()->isWidgetType()) ce->child()->installEventFilter(this);
+    }
+    return QWidget::eventFilter(o, e);
 }
 
 void ReadingPane::setTheme(const Theme& t)
@@ -130,7 +152,9 @@ void ReadingPane::setTheme(const Theme& t)
     QString html = QString::fromUtf8(f.readAll());
     html.replace(QStringLiteral("/*THEME*/"), t.webCss());
     m_pageReady = false;
+    const qreal z = m_view->zoomFactor();
     m_view->setHtml(html, QUrl(QStringLiteral("qrc:///reading.html")));
+    m_view->setZoomFactor(z);
     m_pendingRender = true;
 }
 
@@ -145,7 +169,6 @@ void ReadingPane::showThread(const QString& threadId)
     const bool changed = threadId != m_threadId;
     m_threadId = threadId;
     m_summaryError.clear();
-    m_blocker->allowRemote = m_remoteAllowed.contains(threadId);
     if (!m_pageReady) { m_pendingRender = true; return; }
     Q_EMIT m_bridge->dataChanged(buildJson(changed));
 }
@@ -153,7 +176,6 @@ void ReadingPane::showThread(const QString& threadId)
 void ReadingPane::refresh()
 {
     if (!m_pageReady) { m_pendingRender = true; return; }
-    m_blocker->allowRemote = m_remoteAllowed.contains(m_threadId);
     Q_EMIT m_bridge->dataChanged(buildJson(false));
 }
 
@@ -189,7 +211,6 @@ QString ReadingPane::buildJson(bool resetExpanded) const
     o[QStringLiteral("threadId")] = t->id;
     o[QStringLiteral("subject")] = t->subject();
     o[QStringLiteral("resetExpanded")] = resetExpanded;
-    o[QStringLiteral("remoteBlocked")] = !m_remoteAllowed.contains(m_threadId);
     o[QStringLiteral("collapseAll")] = false;
 
     const TriageResult tr = m_store->triage(t->id);

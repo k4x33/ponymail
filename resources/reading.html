@@ -6,11 +6,11 @@
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <style>
 /*THEME*/
-html, body { margin:0; padding:0; background: var(--surface); color: var(--text); font-family: "Segoe UI","Helvetica Neue",Arial,sans-serif; font-size:14px; }
+html, body { margin:0; padding:0; background: var(--surface); color: var(--text); font-family: "Segoe UI","Helvetica Neue",Arial,sans-serif; font-size:13px; }
 #root { padding: 0 0 48px 0; }
 .empty { display:flex; height:80vh; align-items:center; justify-content:center; color: var(--faint); flex-direction:column; gap:8px; }
 .empty .big { font-size:40px; }
-.subject { font-size:20px; font-weight:600; padding:18px 24px 6px; display:flex; align-items:center; gap:10px; }
+.subject { font-size:18px; font-weight:600; padding:18px 24px 6px; display:flex; align-items:center; gap:10px; }
 .subject .tag { font-size:11px; font-weight:700; color:#fff; border-radius:4px; padding:3px 7px; letter-spacing:.3px; }
 .notice { margin: 0 24px 10px; padding:8px 12px; background: var(--surface-alt); border:1px solid var(--border); border-radius:6px; font-size:12px; color: var(--muted); display:flex; align-items:center; gap:10px; }
 .notice button { margin-left:auto; }
@@ -114,7 +114,6 @@ function render(data){
   let h = '';
   const tag = data.triage && data.triage.tag || 'Evaluating';
   h += `<div class="subject"><span class="tag" style="background:${TAGC[tag]}">${TAGL[tag]}${tag==='Action'&&data.triage.count>1?' ×'+data.triage.count:''}</span><span>${esc(data.subject||'(no subject)')}</span></div>`;
-  if (data.remoteBlocked) h += `<div class="notice">🔒 Remote images are blocked to prevent tracking. <button class="pm" onclick="bridge.loadRemoteImages()">Load images</button></div>`;
   h += renderSummary(data);
   const msgs = data.messages.slice().reverse(); // newest first
   const multi = msgs.length > 1;

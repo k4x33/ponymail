@@ -66,7 +66,7 @@ private:
     MailStore* m_store; SyncEngine* m_sync; ClaudeClient* m_ai; SummaryQueue* m_queue;
 
     NavRail* m_nav; MessageListModel* m_model; MessageListView* m_list; ReadingPane* m_reading; QSplitter* m_splitter;
-    QLineEdit* m_search; QComboBox* m_filter; QToolButton* m_unreadToggle; QLabel* m_syncLabel; QLabel* m_listTitle;
+    QLineEdit* m_search; QComboBox* m_filter; QToolButton* m_unreadToggle; QLabel* m_syncLabel; QLabel* m_listTitle; QLabel* m_zoomLabel;
     QAction *m_replyA, *m_replyAllA, *m_forwardA, *m_deleteA, *m_archiveA, *m_snoozeA, *m_blockA, *m_readA, *m_starA, *m_aiA;
     Theme m_theme = Theme::light();
     Folder m_folderBeforeSearch;

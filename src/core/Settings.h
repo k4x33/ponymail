@@ -23,6 +23,8 @@ public:
     void setWindowGeometry(const QByteArray& g);
     QByteArray windowState() const;
     void setWindowState(const QByteArray& s);
+    qreal readingZoom() const;
+    void setReadingZoom(qreal z);
     int splitterListWidth() const;
     void setSplitterListWidth(int px);
 
