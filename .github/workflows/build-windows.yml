@@ -63,8 +63,9 @@ jobs:
           & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-opengl-sw dist\PonyMail.exe
           if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
           # App-local VC++ runtime so the per-user installer needs no admin rights.
-          $crt = Join-Path $env:VCToolsRedistDir "x64\Microsoft.VC143.CRT"
-          Copy-Item "$crt\*.dll" dist\ -Force
+          $crt = Get-ChildItem -Directory (Join-Path $env:VCToolsRedistDir "x64") -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
+          if (-not $crt) { throw "VC CRT redist folder not found under $env:VCToolsRedistDir\x64" }
+          Copy-Item "$($crt.FullName)\*.dll" dist\ -Force
           Get-ChildItem dist | Measure-Object | Select-Object -ExpandProperty Count
 
       - name: Build installer (Inno Setup)
