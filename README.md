@@ -12,14 +12,28 @@ Windows SmartScreen will warn because the binary is unsigned; choose *More info 
 
 ## First run
 
-Settings gear → **Account & API keys**:
+PonyMail opens **Add an account** and asks which type to add, in the style of new Outlook:
 
-| Field | Where it comes from |
+| Choice | What happens |
 | --- | --- |
-| Client ID / Client secret | Google Cloud Console → APIs & Services → Credentials → OAuth client. Type must be **Desktop app** (a *Web application* client rejects the `http://127.0.0.1:<port>/` loopback redirect PKCE uses). Gmail API must be enabled on the project. |
-| Claude API key | console.anthropic.com. Optional; without it the AI card shows a hint and triage tabs stay gray. |
+| **Outlook** (Microsoft 365, Outlook.com, Hotmail) | Browser opens on the Microsoft identity platform; PKCE public-client flow, no secret. Sign-in and token storage work today; **mailbox sync via Microsoft Graph is not implemented yet**, so mail features still require a Google account. |
+| **Google** (Gmail, Workspace) | Browser opens on Google; PKCE flow with loopback redirect. Full mailbox sync. |
+| **Other** | IMAP/POP/Exchange are not supported in this build. |
 
-Click **Sign in with Google**. The browser opens, consent completes on a loopback redirect, and the refresh token is written to Windows Credential Manager. Nothing secret touches disk in plain text.
+Tokens go to Windows Credential Manager; PonyMail never sees the password.
+
+### Built-in OAuth clients (recommended)
+
+For the one-click experience the build must carry OAuth client IDs. Add these **repository secrets** (Settings → Secrets and variables → Actions) and re-run the workflow:
+
+| Secret | Value |
+| --- | --- |
+| `PONYMAIL_GOOGLE_CLIENT_ID` / `PONYMAIL_GOOGLE_CLIENT_SECRET` | Google Cloud Console OAuth client of type **Desktop app**, Gmail API enabled. A *Web application* client will reject the `http://127.0.0.1:<port>/` redirect. |
+| `PONYMAIL_MS_CLIENT_ID` | Entra app registration, *Mobile and desktop applications* platform with redirect `http://localhost`, delegated Graph permissions `Mail.ReadWrite`, `Mail.Send`, `offline_access`, `openid`, `profile`, `email`; multi-tenant + personal accounts. |
+
+When a build lacks a client, the sign-in page asks for the developer client once and stores it locally.
+
+Settings gear → **Account & AI** holds the Claude API key, model and display name, plus *Switch account* / *Remove account*.
 
 ## Local storage
 

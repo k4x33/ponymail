@@ -15,36 +15,103 @@
 #include <QRandomGenerator>
 #include <QDebug>
 
+#ifndef PONYMAIL_GOOGLE_CLIENT_ID
+#  define PONYMAIL_GOOGLE_CLIENT_ID ""
+#endif
+#ifndef PONYMAIL_GOOGLE_CLIENT_SECRET
+#  define PONYMAIL_GOOGLE_CLIENT_SECRET ""
+#endif
+#ifndef PONYMAIL_MS_CLIENT_ID
+#  define PONYMAIL_MS_CLIENT_ID ""
+#endif
+
 namespace ponymail {
 
-namespace {
-const QString kRefreshKey = QStringLiteral("google.refresh_token");
-const QString kSecretKey = QStringLiteral("google.client_secret");
-const QString kAuthEndpoint = QStringLiteral("https://accounts.google.com/o/oauth2/v2/auth");
-const QString kTokenEndpoint = QStringLiteral("https://oauth2.googleapis.com/token");
-const QString kRevokeEndpoint = QStringLiteral("https://oauth2.googleapis.com/revoke");
-// Full mailbox scope is required for permanent delete (users.messages.batchDelete)
-// and for emptying Trash/Spam, per spec §3.1.
-const QString kScope = QStringLiteral("https://mail.google.com/ https://www.googleapis.com/auth/userinfo.email");
+QString providerKey(Provider p)
+{
+    switch (p) {
+    case Provider::Google: return QStringLiteral("google");
+    case Provider::Microsoft: return QStringLiteral("microsoft");
+    default: return QString();
+    }
+}
+
+Provider providerFromKey(const QString& k)
+{
+    if (k == QLatin1String("google")) return Provider::Google;
+    if (k == QLatin1String("microsoft")) return Provider::Microsoft;
+    return Provider::None;
+}
+
+QString providerDisplayName(Provider p)
+{
+    switch (p) {
+    case Provider::Google: return QStringLiteral("Google");
+    case Provider::Microsoft: return QStringLiteral("Outlook");
+    default: return QString();
+    }
+}
+
+OAuthManager::Endpoints OAuthManager::endpoints(Provider p)
+{
+    if (p == Provider::Microsoft) {
+        return {QStringLiteral("https://login.microsoftonline.com/common/oauth2/v2.0/authorize"),
+                QStringLiteral("https://login.microsoftonline.com/common/oauth2/v2.0/token"),
+                QString(),
+                QStringLiteral("offline_access openid profile email https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send"),
+                false};
+    }
+    // Full mailbox scope is required for permanent delete (users.messages.batchDelete)
+    // and for emptying Trash/Spam, per spec §3.1.
+    return {QStringLiteral("https://accounts.google.com/o/oauth2/v2/auth"),
+            QStringLiteral("https://oauth2.googleapis.com/token"),
+            QStringLiteral("https://oauth2.googleapis.com/revoke"),
+            QStringLiteral("https://mail.google.com/ https://www.googleapis.com/auth/userinfo.email"),
+            true};
 }
 
 OAuthManager::OAuthManager(Settings* settings, QNetworkAccessManager* nam, QObject* parent)
     : QObject(parent), m_settings(settings), m_nam(nam) {}
 
-bool OAuthManager::hasCredentials() const
+Provider OAuthManager::activeProvider() const { return providerFromKey(m_settings->accountProvider()); }
+
+bool OAuthManager::hasRefreshToken(Provider p) const { return p != Provider::None && !CredentialStore::read(refreshKey(p)).isEmpty(); }
+
+bool OAuthManager::hasBuiltInClient(Provider p) const
 {
-    return !m_settings->oauthClientId().isEmpty() && !CredentialStore::read(kSecretKey).isEmpty();
+    if (p == Provider::Google) return !QString::fromLatin1(PONYMAIL_GOOGLE_CLIENT_ID).isEmpty() && !QString::fromLatin1(PONYMAIL_GOOGLE_CLIENT_SECRET).isEmpty();
+    if (p == Provider::Microsoft) return !QString::fromLatin1(PONYMAIL_MS_CLIENT_ID).isEmpty();
+    return false;
 }
 
-bool OAuthManager::hasRefreshToken() const { return !CredentialStore::read(kRefreshKey).isEmpty(); }
-
-void OAuthManager::setClientCredentials(const QString& clientId, const QString& clientSecret)
+QString OAuthManager::clientId(Provider p) const
 {
-    m_settings->setOauthClientId(clientId.trimmed());
-    CredentialStore::write(kSecretKey, clientSecret.trimmed());
+    const QString user = m_settings->clientId(providerKey(p));
+    if (!user.isEmpty()) return user;
+    if (p == Provider::Google) return QString::fromLatin1(PONYMAIL_GOOGLE_CLIENT_ID);
+    if (p == Provider::Microsoft) return QString::fromLatin1(PONYMAIL_MS_CLIENT_ID);
+    return {};
 }
 
-QString OAuthManager::clientId() const { return m_settings->oauthClientId(); }
+QString OAuthManager::clientSecret(Provider p) const
+{
+    if (p != Provider::Google) return {};
+    const QString user = CredentialStore::read(secretKey(p));
+    if (!user.isEmpty() && !m_settings->clientId(providerKey(p)).isEmpty()) return user;
+    return QString::fromLatin1(PONYMAIL_GOOGLE_CLIENT_SECRET);
+}
+
+bool OAuthManager::hasClientConfig(Provider p) const
+{
+    if (clientId(p).isEmpty()) return false;
+    return !endpoints(p).needsSecret || !clientSecret(p).isEmpty();
+}
+
+void OAuthManager::setUserClient(Provider p, const QString& id, const QString& secret)
+{
+    m_settings->setClientId(providerKey(p), id.trimmed());
+    if (endpoints(p).needsSecret) CredentialStore::write(secretKey(p), secret.trimmed());
+}
 
 QString OAuthManager::randomString(int len)
 {
@@ -56,10 +123,11 @@ QString OAuthManager::randomString(int len)
     return s;
 }
 
-void OAuthManager::startInteractiveLogin()
+void OAuthManager::startInteractiveLogin(Provider p)
 {
     cancelInteractiveLogin();
-    if (!hasCredentials()) { Q_EMIT authFailed(QStringLiteral("OAuth client ID / secret not configured.")); return; }
+    if (!hasClientConfig(p)) { Q_EMIT authFailed(QStringLiteral("No OAuth client configured for ") + providerDisplayName(p) + QLatin1Char('.')); return; }
+    m_pendingProvider = p;
 
     m_server = new QTcpServer(this);
     if (!m_server->listen(QHostAddress::LocalHost, 0)) {
@@ -67,24 +135,31 @@ void OAuthManager::startInteractiveLogin()
         return;
     }
     connect(m_server, &QTcpServer::newConnection, this, &OAuthManager::onLoopbackConnection);
-    m_redirectUri = QStringLiteral("http://127.0.0.1:%1/").arg(m_server->serverPort());
+    // Microsoft registers "http://localhost" (any port) for desktop apps; Google accepts 127.0.0.1 with any port.
+    const QString host = p == Provider::Microsoft ? QStringLiteral("localhost") : QStringLiteral("127.0.0.1");
+    m_redirectUri = QStringLiteral("http://%1:%2/").arg(host).arg(m_server->serverPort());
 
     m_codeVerifier = randomString(96);
     m_state = randomString(32);
-    const QByteArray challenge = util::base64Url(
-        QCryptographicHash::hash(m_codeVerifier.toLatin1(), QCryptographicHash::Sha256));
+    const QByteArray challenge = util::base64Url(QCryptographicHash::hash(m_codeVerifier.toLatin1(), QCryptographicHash::Sha256));
 
-    QUrl url(kAuthEndpoint);
+    const Endpoints ep = endpoints(p);
+    QUrl url(ep.authorize);
     QUrlQuery q;
-    q.addQueryItem(QStringLiteral("client_id"), clientId());
+    q.addQueryItem(QStringLiteral("client_id"), clientId(p));
     q.addQueryItem(QStringLiteral("redirect_uri"), m_redirectUri);
     q.addQueryItem(QStringLiteral("response_type"), QStringLiteral("code"));
-    q.addQueryItem(QStringLiteral("scope"), kScope);
+    q.addQueryItem(QStringLiteral("scope"), ep.scope);
     q.addQueryItem(QStringLiteral("code_challenge"), QString::fromLatin1(challenge));
     q.addQueryItem(QStringLiteral("code_challenge_method"), QStringLiteral("S256"));
-    q.addQueryItem(QStringLiteral("access_type"), QStringLiteral("offline"));
-    q.addQueryItem(QStringLiteral("prompt"), QStringLiteral("consent"));
     q.addQueryItem(QStringLiteral("state"), m_state);
+    if (p == Provider::Google) {
+        q.addQueryItem(QStringLiteral("access_type"), QStringLiteral("offline"));
+        q.addQueryItem(QStringLiteral("prompt"), QStringLiteral("consent"));
+    } else {
+        q.addQueryItem(QStringLiteral("response_mode"), QStringLiteral("query"));
+        q.addQueryItem(QStringLiteral("prompt"), QStringLiteral("select_account"));
+    }
     url.setQuery(q);
 
     Q_EMIT loginStarted(url);
@@ -111,9 +186,11 @@ void OAuthManager::onLoopbackConnection()
                 const QUrl u(QStringLiteral("http://127.0.0.1") + QString::fromLatin1(parts[1]));
                 QUrlQuery qq(u);
                 code = qq.queryItemValue(QStringLiteral("code"));
-                error = qq.queryItemValue(QStringLiteral("error"));
+                error = qq.queryItemValue(QStringLiteral("error_description"), QUrl::FullyDecoded);
+                if (error.isEmpty()) error = qq.queryItemValue(QStringLiteral("error"));
                 stateOk = qq.queryItemValue(QStringLiteral("state")) == m_state;
             }
+            if (parts.size() >= 2 && parts[1].startsWith("/favicon")) { sock->disconnectFromHost(); sock->deleteLater(); return; }
             const bool ok = !code.isEmpty() && stateOk;
             const QByteArray html = ok
                 ? "<html><body style='font-family:Segoe UI,sans-serif;text-align:center;padding:48px'>"
@@ -135,33 +212,36 @@ void OAuthManager::onLoopbackConnection()
 
 void OAuthManager::exchangeCode(const QString& code)
 {
+    const Provider p = m_pendingProvider;
+    const Endpoints ep = endpoints(p);
     QUrlQuery body;
-    body.addQueryItem(QStringLiteral("client_id"), clientId());
-    body.addQueryItem(QStringLiteral("client_secret"), CredentialStore::read(kSecretKey));
+    body.addQueryItem(QStringLiteral("client_id"), clientId(p));
+    if (ep.needsSecret) body.addQueryItem(QStringLiteral("client_secret"), clientSecret(p));
     body.addQueryItem(QStringLiteral("code"), code);
     body.addQueryItem(QStringLiteral("code_verifier"), m_codeVerifier);
     body.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("authorization_code"));
     body.addQueryItem(QStringLiteral("redirect_uri"), m_redirectUri);
+    if (p == Provider::Microsoft) body.addQueryItem(QStringLiteral("scope"), ep.scope);
 
-    QNetworkRequest req{QUrl(kTokenEndpoint)};
+    QNetworkRequest req{QUrl(ep.token)};
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
     QNetworkReply* reply = m_nam->post(req, body.toString(QUrl::FullyEncoded).toUtf8());
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, p]() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        handleTokenResponse(reply->readAll(), status, nullptr, false);
+        handleTokenResponse(p, reply->readAll(), status, nullptr, false);
         reply->deleteLater();
     });
 }
 
-void OAuthManager::handleTokenResponse(const QByteArray& body, int status, TokenCallback cb, bool fromRefresh)
+void OAuthManager::handleTokenResponse(Provider p, const QByteArray& body, int status, TokenCallback cb, bool fromRefresh)
 {
     const QJsonObject o = QJsonDocument::fromJson(body).object();
     if (status != 200 || o.contains(QStringLiteral("error"))) {
         const QString err = o.value(QStringLiteral("error_description")).toString(
             o.value(QStringLiteral("error")).toString(QStringLiteral("HTTP %1").arg(status)));
         if (fromRefresh && o.value(QStringLiteral("error")).toString() == QLatin1String("invalid_grant")) {
-            // Refresh token revoked/expired: force a fresh login.
-            CredentialStore::remove(kRefreshKey);
+            CredentialStore::remove(refreshKey(p));
+            m_settings->setAccountProvider(QString());
             Q_EMIT signedOut();
         }
         if (cb) cb({}, err);
@@ -172,15 +252,28 @@ void OAuthManager::handleTokenResponse(const QByteArray& body, int status, Token
     const int expiresIn = o.value(QStringLiteral("expires_in")).toInt(3600);
     m_expiresAt = QDateTime::currentDateTimeUtc().addSecs(expiresIn);
     const QString refresh = o.value(QStringLiteral("refresh_token")).toString();
-    if (!refresh.isEmpty()) CredentialStore::write(kRefreshKey, refresh);
+    if (!refresh.isEmpty()) CredentialStore::write(refreshKey(p), refresh);
+    if (!fromRefresh) {
+        // Remove any other provider's token: PonyMail holds one account at a time.
+        for (Provider other : {Provider::Google, Provider::Microsoft}) if (other != p) CredentialStore::remove(refreshKey(other));
+        m_settings->setAccountProvider(providerKey(p));
+        // Microsoft returns an id_token carrying the signed-in address.
+        const QStringList idParts = o.value(QStringLiteral("id_token")).toString().split('.');
+        if (idParts.size() >= 2) {
+            const QJsonObject claims = QJsonDocument::fromJson(util::fromBase64Url(idParts[1].toLatin1())).object();
+            const QString email = claims.value(QStringLiteral("preferred_username")).toString(claims.value(QStringLiteral("email")).toString());
+            const QString name = claims.value(QStringLiteral("name")).toString();
+            if (!email.isEmpty()) m_settings->setUserEmail(email);
+            if (!name.isEmpty()) m_settings->setUserName(name);
+        }
+    }
     if (cb) cb(m_accessToken, {});
-    if (!fromRefresh) Q_EMIT authenticated();
+    if (!fromRefresh) Q_EMIT authenticated(p);
 }
 
 void OAuthManager::withAccessToken(TokenCallback cb)
 {
-    if (!m_accessToken.isEmpty() && m_expiresAt.isValid()
-        && QDateTime::currentDateTimeUtc().secsTo(m_expiresAt) > 60) {
+    if (!m_accessToken.isEmpty() && m_expiresAt.isValid() && QDateTime::currentDateTimeUtc().secsTo(m_expiresAt) > 60) {
         cb(m_accessToken, {});
         return;
     }
@@ -189,44 +282,51 @@ void OAuthManager::withAccessToken(TokenCallback cb)
 
 void OAuthManager::refreshAccessToken(TokenCallback cb)
 {
-    const QString refresh = CredentialStore::read(kRefreshKey);
+    const Provider p = activeProvider();
+    const QString refresh = p == Provider::None ? QString() : CredentialStore::read(refreshKey(p));
     if (refresh.isEmpty()) { cb({}, QStringLiteral("Not signed in.")); return; }
     m_pending << std::move(cb);
     if (m_refreshing) return;
     m_refreshing = true;
 
+    const Endpoints ep = endpoints(p);
     QUrlQuery body;
-    body.addQueryItem(QStringLiteral("client_id"), clientId());
-    body.addQueryItem(QStringLiteral("client_secret"), CredentialStore::read(kSecretKey));
+    body.addQueryItem(QStringLiteral("client_id"), clientId(p));
+    if (ep.needsSecret) body.addQueryItem(QStringLiteral("client_secret"), clientSecret(p));
     body.addQueryItem(QStringLiteral("refresh_token"), refresh);
     body.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("refresh_token"));
+    if (p == Provider::Microsoft) body.addQueryItem(QStringLiteral("scope"), ep.scope);
 
-    QNetworkRequest req{QUrl(kTokenEndpoint)};
+    QNetworkRequest req{QUrl(ep.token)};
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
     QNetworkReply* reply = m_nam->post(req, body.toString(QUrl::FullyEncoded).toUtf8());
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, p]() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray data = reply->readAll();
         reply->deleteLater();
         m_refreshing = false;
         auto waiters = m_pending;
         m_pending.clear();
-        handleTokenResponse(data, status, [waiters](const QString& tok, const QString& err) {
-            for (const auto& w : waiters) w(tok, err);
-        }, true);
+        handleTokenResponse(p, data, status, [waiters](const QString& tok, const QString& err) { for (const auto& w : waiters) w(tok, err); }, true);
     });
 }
 
 void OAuthManager::signOut()
 {
-    const QString refresh = CredentialStore::read(kRefreshKey);
-    if (!refresh.isEmpty()) {
-        QNetworkRequest req{QUrl(kRevokeEndpoint)};
-        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
-        QNetworkReply* r = m_nam->post(req, QByteArray("token=") + QUrl::toPercentEncoding(refresh));
-        connect(r, &QNetworkReply::finished, r, &QNetworkReply::deleteLater);
+    const Provider p = activeProvider();
+    if (p != Provider::None) {
+        const QString refresh = CredentialStore::read(refreshKey(p));
+        const Endpoints ep = endpoints(p);
+        if (!refresh.isEmpty() && !ep.revoke.isEmpty()) {
+            QNetworkRequest req{QUrl(ep.revoke)};
+            req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
+            QNetworkReply* r = m_nam->post(req, QByteArray("token=") + QUrl::toPercentEncoding(refresh));
+            connect(r, &QNetworkReply::finished, r, &QNetworkReply::deleteLater);
+        }
+        CredentialStore::remove(refreshKey(p));
     }
-    CredentialStore::remove(kRefreshKey);
+    m_settings->setAccountProvider(QString());
+    m_settings->setUserEmail(QString());
     invalidateAccessToken();
     Q_EMIT signedOut();
 }

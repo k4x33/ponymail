@@ -67,7 +67,17 @@ QString Settings::userEmail() const { return str("user_email"); }
 void Settings::setUserEmail(const QString& e) { set("user_email", e); }
 QString Settings::userName() const { return str("user_name", QStringLiteral("Mike Brophy")); }
 void Settings::setUserName(const QString& n) { set("user_name", n); }
-QString Settings::oauthClientId() const { return str("oauth_client_id"); }
-void Settings::setOauthClientId(const QString& id) { set("oauth_client_id", id); }
+QString Settings::accountProvider() const { return str("account_provider"); }
+void Settings::setAccountProvider(const QString& p) { set("account_provider", p); }
+QString Settings::clientId(const QString& provider) const
+{
+    if (provider == QLatin1String("google")) { const QString legacy = str("oauth_client_id"); if (!legacy.isEmpty()) return legacy; }
+    return str(QByteArray("client_id_" + provider.toLatin1()).constData());
+}
+void Settings::setClientId(const QString& provider, const QString& id)
+{
+    if (provider == QLatin1String("google")) m_obj.remove(QStringLiteral("oauth_client_id"));
+    set(QByteArray("client_id_" + provider.toLatin1()).constData(), id);
+}
 
 } // namespace ponymail

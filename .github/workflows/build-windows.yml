@@ -40,6 +40,10 @@ jobs:
 
       - name: Configure
         shell: pwsh
+        env:
+          PONYMAIL_GOOGLE_CLIENT_ID: ${{ secrets.PONYMAIL_GOOGLE_CLIENT_ID }}
+          PONYMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.PONYMAIL_GOOGLE_CLIENT_SECRET }}
+          PONYMAIL_MS_CLIENT_ID: ${{ secrets.PONYMAIL_MS_CLIENT_ID }}
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPONYMAIL_BUILD_TESTS=ON
 

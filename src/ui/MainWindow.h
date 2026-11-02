@@ -37,6 +37,8 @@ private:
     void connectSignals();
     void ensureSignedIn();
     void openAccountDialog();
+    void openAddAccount();
+    void startMailbox();
     void onFolderSelected(const Folder& f);
     void onSelectionChanged();
     void onSearchSubmitted();

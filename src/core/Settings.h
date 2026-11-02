@@ -43,8 +43,10 @@ public:
     void setUserEmail(const QString& e);
     QString userName() const;
     void setUserName(const QString& n);
-    QString oauthClientId() const;         // client id is not a secret; secret lives in keyring
-    void setOauthClientId(const QString& id);
+    QString accountProvider() const;       // google | microsoft | "" (no account)
+    void setAccountProvider(const QString& p);
+    QString clientId(const QString& provider) const;   // user-supplied developer client id (optional)
+    void setClientId(const QString& provider, const QString& id);
 
     QJsonObject raw() const { return m_obj; }
 

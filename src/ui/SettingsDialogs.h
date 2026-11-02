@@ -15,21 +15,21 @@ class OAuthManager;
 class ClaudeClient;
 class Database;
 
-// Account: Google OAuth client credentials, sign-in state, Claude API key + model.
+// Account & AI: connected mailbox (add / remove), display name, Claude API key + model.
 class AccountDialog : public QDialog {
     Q_OBJECT
 public:
     AccountDialog(Settings* settings, OAuthManager* auth, ClaudeClient* ai, QWidget* parent = nullptr);
 Q_SIGNALS:
-    void signInRequested();
+    void addAccountRequested();
     void signOutRequested();
 private:
     void refreshState();
     Settings* m_settings; OAuthManager* m_auth; ClaudeClient* m_ai;
-    QLineEdit *m_clientId, *m_clientSecret, *m_apiKey, *m_userName;
+    QLineEdit *m_apiKey, *m_userName;
     QComboBox* m_model;
     QLabel* m_state;
-    QPushButton *m_signIn, *m_signOut;
+    QPushButton *m_addAccount, *m_signOut;
 };
 
 class AiWritingStyleDialog : public QDialog {

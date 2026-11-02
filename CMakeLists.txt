@@ -9,6 +9,12 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 option(PONYMAIL_BUILD_TESTS "Build unit tests" ON)
 
+# Built-in OAuth clients (set by CI from repository secrets). When empty, the
+# Add-account dialog asks the user for a developer client once.
+set(PONYMAIL_GOOGLE_CLIENT_ID "$ENV{PONYMAIL_GOOGLE_CLIENT_ID}" CACHE STRING "Google OAuth desktop client id")
+set(PONYMAIL_GOOGLE_CLIENT_SECRET "$ENV{PONYMAIL_GOOGLE_CLIENT_SECRET}" CACHE STRING "Google OAuth desktop client secret")
+set(PONYMAIL_MS_CLIENT_ID "$ENV{PONYMAIL_MS_CLIENT_ID}" CACHE STRING "Microsoft Entra public client (application) id")
+
 find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets Network Sql
     WebEngineWidgets WebChannel)
@@ -44,6 +50,7 @@ set(PONYMAIL_SOURCES
     src/ui/ComposeWindow.cpp
     src/ui/AiDialog.cpp
     src/ui/SettingsDialogs.cpp
+    src/ui/AccountSetupDialog.cpp
 )
 
 set(PONYMAIL_HEADERS
@@ -75,6 +82,7 @@ set(PONYMAIL_HEADERS
     src/ui/ComposeWindow.h
     src/ui/AiDialog.h
     src/ui/SettingsDialogs.h
+    src/ui/AccountSetupDialog.h
 )
 
 add_library(ponymail_core STATIC ${PONYMAIL_SOURCES} ${PONYMAIL_HEADERS} resources/ponymail.qrc)
@@ -85,6 +93,10 @@ target_link_libraries(ponymail_core PUBLIC
 target_compile_definitions(ponymail_core PUBLIC
     PONYMAIL_VERSION="${PROJECT_VERSION}"
     QT_NO_KEYWORDS)
+target_compile_definitions(ponymail_core PRIVATE
+    PONYMAIL_GOOGLE_CLIENT_ID="${PONYMAIL_GOOGLE_CLIENT_ID}"
+    PONYMAIL_GOOGLE_CLIENT_SECRET="${PONYMAIL_GOOGLE_CLIENT_SECRET}"
+    PONYMAIL_MS_CLIENT_ID="${PONYMAIL_MS_CLIENT_ID}")
 
 if(WIN32)
     target_link_libraries(ponymail_core PUBLIC advapi32)

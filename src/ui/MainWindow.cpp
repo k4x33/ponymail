@@ -9,6 +9,7 @@
 #include "ComposeWindow.h"
 #include "AiDialog.h"
 #include "SettingsDialogs.h"
+#include "AccountSetupDialog.h"
 #include "Icons.h"
 #include "core/Settings.h"
 #include "core/Paths.h"
@@ -160,7 +161,8 @@ void MainWindow::buildUi()
     m_nav = new NavRail(m_splitter);
     m_nav->setFolders(m_sync->systemFolders(), m_sync->labelFolders());
     auto* settingsMenu = new QMenu(this);
-    connect(settingsMenu->addAction(QStringLiteral("Account & API keys…")), &QAction::triggered, this, &MainWindow::openAccountDialog);
+    connect(settingsMenu->addAction(QStringLiteral("Add account…")), &QAction::triggered, this, &MainWindow::openAddAccount);
+    connect(settingsMenu->addAction(QStringLiteral("Account & AI…")), &QAction::triggered, this, &MainWindow::openAccountDialog);
     connect(settingsMenu->addAction(QStringLiteral("AI Writing Style…")), &QAction::triggered, this, [this]() { AiWritingStyleDialog d(m_settings, this); d.exec(); });
     connect(settingsMenu->addAction(QStringLiteral("Blocked Senders…")), &QAction::triggered, this, [this]() { BlockedSendersDialog d(m_db, this); d.exec(); });
     settingsMenu->addSeparator();
@@ -302,9 +304,14 @@ void MainWindow::connectSignals()
         m_model->setIdentity(email, m_settings->userName());
     });
 
-    connect(m_auth, &OAuthManager::authenticated, this, [this]() { showStatus(QStringLiteral("Signed in.")); m_sync->start(); });
+    connect(m_auth, &OAuthManager::authenticated, this, [this](Provider p) { showStatus(QStringLiteral("Signed in with ") + providerDisplayName(p) + QLatin1Char('.')); });
     connect(m_auth, &OAuthManager::authFailed, this, [this](const QString& e) { showStatus(QStringLiteral("Sign-in failed: ") + e, 10000); });
-    connect(m_auth, &OAuthManager::signedOut, this, [this]() { m_sync->stop(); m_reading->clear(); showStatus(QStringLiteral("Signed out.")); QTimer::singleShot(300, this, &MainWindow::ensureSignedIn); });
+    connect(m_auth, &OAuthManager::signedOut, this, [this]() {
+        m_sync->stop(); m_reading->clear(); m_nav->setAccountLabel(QString());
+        m_model->setFolder(QString());
+        showStatus(QStringLiteral("Account removed."));
+        QTimer::singleShot(300, this, &MainWindow::ensureSignedIn);
+    });
     connect(m_gmail, &GmailClient::authExpired, this, [this]() { QTimer::singleShot(0, this, &MainWindow::ensureSignedIn); });
 
     connect(m_queue, &SummaryQueue::summaryReady, this, [this](const QString&) { updateCounts(); });
@@ -368,19 +375,40 @@ void MainWindow::showStatus(const QString& msg, int ms) { statusBar()->showMessa
 
 void MainWindow::ensureSignedIn()
 {
-    if (m_auth->isAuthenticated()) { m_sync->start(); return; }
-    openAccountDialog();
+    if (m_auth->isAuthenticated()) { startMailbox(); return; }
+    openAddAccount();
+}
+
+void MainWindow::openAddAccount()
+{
+    if (findChild<AccountSetupDialog*>()) return;   // already open
+    auto* dlg = new AccountSetupDialog(m_auth, m_theme, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &AccountSetupDialog::accountAdded, this, [this](Provider) { m_sync->stop(); m_reading->clear(); startMailbox(); });
+    dlg->open();
 }
 
 void MainWindow::openAccountDialog()
 {
     auto* dlg = new AccountDialog(m_settings, m_auth, m_ai, this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
-    connect(dlg, &AccountDialog::signInRequested, this, [this]() { m_auth->startInteractiveLogin(); });
+    connect(dlg, &AccountDialog::addAccountRequested, this, [this, dlg]() { dlg->accept(); openAddAccount(); });
     connect(dlg, &AccountDialog::signOutRequested, this, [this]() { m_auth->signOut(); });
-    connect(m_auth, &OAuthManager::authenticated, dlg, &QDialog::accept);
-    connect(dlg, &QDialog::finished, this, [this](int) { if (m_auth->isAuthenticated()) m_sync->start(); });
     dlg->open();
+}
+
+void MainWindow::startMailbox()
+{
+    const Provider p = m_auth->activeProvider();
+    if (p == Provider::Google) { m_sync->start(); return; }
+    if (p == Provider::Microsoft) {
+        m_nav->setAccountLabel(m_settings->userEmail());
+        m_model->setIdentity(m_settings->userEmail(), m_settings->userName());
+        showStatus(QStringLiteral("Outlook account connected (%1). Mailbox sync for Microsoft Graph is not available in this build; mail features currently require a Google account.").arg(m_settings->userEmail()), 0);
+        QMessageBox::information(this, QStringLiteral("Outlook account connected"),
+            QStringLiteral("Signed in as %1.\n\nThis build syncs mail through the Gmail API only; Microsoft Graph mailbox sync is not yet implemented. "
+                           "Your Outlook sign-in has been saved securely and will be used once Graph support ships. To read mail now, add a Google account.").arg(m_settings->userEmail()));
+    }
 }
 
 // ---------------------------------------------------------------------------

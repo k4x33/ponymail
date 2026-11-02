@@ -25,40 +25,31 @@ namespace ponymail {
 AccountDialog::AccountDialog(Settings* settings, OAuthManager* auth, ClaudeClient* ai, QWidget* parent)
     : QDialog(parent), m_settings(settings), m_auth(auth), m_ai(ai)
 {
-    setWindowTitle(QStringLiteral("Account & API keys"));
-    resize(560, 420);
+    setWindowTitle(QStringLiteral("Account & AI"));
+    resize(560, 400);
     auto* layout = new QVBoxLayout(this);
 
-    auto* g = new QLabel(QStringLiteral("<b>Google (Gmail API)</b><br><span style='color:#616161'>Use an OAuth client of type <i>Desktop app</i> from Google Cloud Console with the Gmail API enabled. The client secret and all tokens are kept in %1.</span>")
-                             .arg(CredentialStore::isOsBacked() ? QStringLiteral("Windows Credential Manager") : QStringLiteral("the local development credential file")), this);
-    g->setWordWrap(true);
-    layout->addWidget(g);
+    layout->addWidget(new QLabel(QStringLiteral("<b>Mail account</b>"), this));
+    auto* row = new QHBoxLayout();
+    m_state = new QLabel(this);
+    m_state->setWordWrap(true);
+    m_addAccount = new QPushButton(QStringLiteral("Add account…"), this);
+    m_addAccount->setProperty("primary", true);
+    m_signOut = new QPushButton(QStringLiteral("Remove account"), this);
+    m_signOut->setProperty("danger", true);
+    row->addWidget(m_state, 1); row->addWidget(m_addAccount); row->addWidget(m_signOut);
+    layout->addLayout(row);
 
     auto* form = new QFormLayout();
     m_userName = new QLineEdit(settings->userName(), this);
-    m_clientId = new QLineEdit(settings->oauthClientId(), this);
-    m_clientSecret = new QLineEdit(this);
-    m_clientSecret->setEchoMode(QLineEdit::Password);
-    m_clientSecret->setPlaceholderText(auth->hasCredentials() ? QStringLiteral("(stored — enter to replace)") : QStringLiteral("GOCSPX-…"));
     form->addRow(QStringLiteral("Display name"), m_userName);
-    form->addRow(QStringLiteral("Client ID"), m_clientId);
-    form->addRow(QStringLiteral("Client secret"), m_clientSecret);
     layout->addLayout(form);
 
-    auto* row = new QHBoxLayout();
-    m_state = new QLabel(this);
-    m_signIn = new QPushButton(QStringLiteral("Sign in with Google"), this);
-    m_signIn->setProperty("primary", true);
-    m_signOut = new QPushButton(QStringLiteral("Sign out"), this);
-    row->addWidget(m_state, 1); row->addWidget(m_signIn); row->addWidget(m_signOut);
-    layout->addLayout(row);
-
-    auto* c = new QLabel(QStringLiteral("<br><b>Claude (summaries, triage, drafting)</b>"), this);
-    layout->addWidget(c);
+    layout->addWidget(new QLabel(QStringLiteral("<br><b>Claude (summaries, triage, drafting)</b>"), this));
     auto* form2 = new QFormLayout();
     m_apiKey = new QLineEdit(this);
     m_apiKey->setEchoMode(QLineEdit::Password);
-    m_apiKey->setPlaceholderText(ai->hasApiKey() ? QStringLiteral("(stored — enter to replace)") : QStringLiteral("sk-ant-…"));
+    m_apiKey->setPlaceholderText(ai->hasApiKey() ? QStringLiteral("(stored in %1 — enter to replace)").arg(CredentialStore::isOsBacked() ? QStringLiteral("Credential Manager") : QStringLiteral("dev store")) : QStringLiteral("sk-ant-…"));
     m_model = new QComboBox(this);
     m_model->setEditable(true);
     m_model->addItems({QStringLiteral("claude-haiku-5-5"), QStringLiteral("claude-sonnet-5-5"), QStringLiteral("claude-opus-5-5")});
@@ -76,32 +67,30 @@ AccountDialog::AccountDialog(Settings* settings, OAuthManager* auth, ClaudeClien
 
     auto save = [this]() {
         m_settings->setUserName(m_userName->text().trimmed());
-        const QString secret = m_clientSecret->text().trimmed();
-        if (!secret.isEmpty()) m_auth->setClientCredentials(m_clientId->text(), secret);
-        else m_settings->setOauthClientId(m_clientId->text().trimmed());
         if (!m_apiKey->text().trimmed().isEmpty()) m_ai->setApiKey(m_apiKey->text().trimmed());
         m_settings->setAiModel(m_model->currentText().trimmed());
     };
     connect(buttons, &QDialogButtonBox::accepted, this, [this, save]() { save(); accept(); });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(m_signIn, &QPushButton::clicked, this, [this, save]() {
-        save();
-        if (!m_auth->hasCredentials()) { QMessageBox::warning(this, QStringLiteral("Missing credentials"), QStringLiteral("Enter the OAuth client ID and secret first.")); return; }
-        Q_EMIT signInRequested();
-        m_state->setText(QStringLiteral("Complete sign-in in your browser…"));
+    connect(m_addAccount, &QPushButton::clicked, this, [this, save]() { save(); Q_EMIT addAccountRequested(); });
+    connect(m_signOut, &QPushButton::clicked, this, [this]() {
+        if (QMessageBox::question(this, QStringLiteral("Remove account"), QStringLiteral("Remove the connected mailbox from PonyMail? Local data (statuses, blocked senders, snoozes) is kept.")) == QMessageBox::Yes) {
+            Q_EMIT signOutRequested();
+            refreshState();
+        }
     });
-    connect(m_signOut, &QPushButton::clicked, this, [this]() { Q_EMIT signOutRequested(); refreshState(); });
-    connect(m_auth, &OAuthManager::authenticated, this, &AccountDialog::refreshState);
+    connect(m_auth, &OAuthManager::authenticated, this, [this](Provider) { refreshState(); });
     connect(m_auth, &OAuthManager::signedOut, this, &AccountDialog::refreshState);
-    connect(m_auth, &OAuthManager::authFailed, this, [this](const QString& e) { m_state->setText(QStringLiteral("<span style='color:#C4314B'>%1</span>").arg(e.toHtmlEscaped())); });
     refreshState();
 }
 
 void AccountDialog::refreshState()
 {
     const bool in = m_auth->isAuthenticated();
-    m_state->setText(in ? QStringLiteral("Signed in as <b>%1</b>").arg(m_settings->userEmail().toHtmlEscaped()) : QStringLiteral("Not signed in"));
+    m_state->setText(in ? QStringLiteral("<b>%1</b> &nbsp;·&nbsp; %2").arg(providerDisplayName(m_auth->activeProvider()), m_settings->userEmail().toHtmlEscaped())
+                        : QStringLiteral("No account connected"));
     m_signOut->setEnabled(in);
+    m_addAccount->setText(in ? QStringLiteral("Switch account…") : QStringLiteral("Add account…"));
 }
 
 // ---------------------------------------------------------------------------
