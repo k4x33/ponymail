@@ -58,6 +58,7 @@ ReadingPane::ReadingPane(MailStore* store, Database* db, GmailClient* gmail, Sum
     auto* page = new ReadingPage(profile, this);
     m_view->setPage(page);
     m_view->setContextMenuPolicy(Qt::NoContextMenu);
+    m_view->setFocusPolicy(Qt::ClickFocus);
 
     m_channel = new QWebChannel(this);
     m_bridge = new ReadingBridge(this);

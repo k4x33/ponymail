@@ -55,7 +55,8 @@ ul.bullets li { margin: 4px 0; line-height:1.45; }
 .from { font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .from .email { font-weight:400; color: var(--muted); font-size:12px; }
 .to { color: var(--muted); font-size:12px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.preview { color: var(--faint); font-size:12px; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.preview { display:none; color: var(--faint); font-size:12px; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.msg.collapsed .preview { display:block; }
 .hright { display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex-shrink:0; }
 .date { color: var(--muted); font-size:12px; white-space:nowrap; }
 .pill-att { display:inline-flex; align-items:center; gap:5px; background: var(--accent); color:#fff; font-weight:700; font-size:11px; border-radius:11px; padding:3px 9px; }
@@ -106,8 +107,23 @@ const TAGC = {Action:'#F59E0B', FollowUp:'#7C3AED', Waiting:'#64748B', Info:'#0F
 const TAGL = {Action:'ACTION', FollowUp:'FOLLOW-UP', Waiting:'WAITING', Info:'INFO', Done:'DONE', Evaluating:'EVALUATING'};
 const STATUSES = [['not_started','Not Started'],['on_hold','On Hold'],['in_progress','In Progress'],['awaiting','Awaiting Someone / Delegated'],['completed','Completed'],['ignore','Ignore']];
 
+let lastMsgSig = null;
+function msgSignature(d){ return (d.messages||[]).map(m => m.id + ':' + (m.unread?1:0) + ':' + (m.isDraft?1:0)).join(','); }
 function render(data){
+  const sameThread = state && data && state.threadId === data.threadId && !data.resetExpanded;
+  if (sameThread && msgSignature(data) === lastMsgSig && document.getElementById('card')) {
+    // Only the summary/triage changed: patch those parts, leave the message DOM alone.
+    state = data;
+    const card = document.getElementById('card');
+    const tmp = document.createElement('div'); tmp.innerHTML = renderSummary(data);
+    card.replaceWith(tmp.firstElementChild);
+    const tag = data.triage && data.triage.tag || 'Evaluating';
+    const tagEl = document.querySelector('.subject .tag');
+    if (tagEl) { tagEl.style.background = TAGC[tag]; tagEl.textContent = TAGL[tag] + (tag==='Action'&&data.triage.count>1?' ×'+data.triage.count:''); }
+    return;
+  }
   state = data;
+  lastMsgSig = msgSignature(data);
   const root = document.getElementById('root');
   if(!data || !data.messages || !data.messages.length){
     root.innerHTML = '<div class="empty"><div class="big">✉</div><div>Select a message to read</div></div>'; return;
@@ -168,11 +184,11 @@ function renderMessage(m, open, d){
   const to = (m.to||[]).map(a=>a.name||a.email).join(', ');
   const cc = (m.cc||[]).map(a=>a.name||a.email).join(', ');
   let h = `<div class="msg ${open?'':'collapsed'}" data-msg="${m.id}" id="m-${m.id}">`;
-  h += `<div class="msg-h" onclick="toggleMsg('${m.id}')">`;
+  h += `<div class="msg-h" data-toggle="${m.id}">`;
   h += `<div class="avatar">${esc(initials(m.from.name, m.from.email))}</div>`;
   h += `<div class="hmeta"><div class="from"><span>${esc(m.from.name||m.from.email)}</span><span class="email">&lt;${esc(m.from.email)}&gt;</span>${m.unread?'<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></span>':''}</div>`;
   h += `<div class="to">To: ${esc(to)}${cc?' &nbsp; Cc: '+esc(cc):''}</div>`;
-  if(!open) h += `<div class="preview">${esc(decodeEntities(m.snippet||''))}</div>`;
+  h += `<div class="preview">${esc(decodeEntities(m.snippet||''))}</div>`;
   h += `</div><div class="hright"><span class="date">${esc(m.date)}</span>`;
   if (atts.length) h += `<span class="pill-att">📎 ${atts.length}</span>`;
   if (m.isDraft) h += `<button class="pill-draft" onclick="event.stopPropagation(); bridge.editDraft('${m.id}')">✎ Edit draft</button>`;
@@ -185,8 +201,23 @@ function renderMessage(m, open, d){
 }
 function toggleMsg(id){
   if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
-  render(state);
+  applyExpansion();
 }
+// In-place expansion: no DOM rebuild, so clicks and scroll position are never lost.
+function applyExpansion(){
+  const multi = state && state.messages && state.messages.length > 1;
+  document.querySelectorAll('.msg').forEach(el => {
+    const id = el.dataset.msg;
+    const open = !multi || expanded.has(id);
+    el.classList.toggle('collapsed', !open);
+  });
+}
+document.addEventListener('click', e => {
+  const hdr = e.target.closest('.msg-h');
+  if (!hdr) return;
+  if (e.target.closest('button, select, a')) return;
+  toggleMsg(hdr.dataset.toggle);
+});
 
 /* Quote + signature collapsing behind "···" pills */
 function makePill(targets){
