@@ -60,7 +60,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build\PonyMail.exe dist\
-          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-translations --no-opengl-sw dist\PonyMail.exe
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-opengl-sw dist\PonyMail.exe
           if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
           # App-local VC++ runtime so the per-user installer needs no admin rights.
           $crt = Join-Path $env:VCToolsRedistDir "x64\Microsoft.VC143.CRT"

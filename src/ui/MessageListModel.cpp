@@ -1,4 +1,5 @@
 #include "MessageListModel.h"
+#include <algorithm>
 #include "storage/Database.h"
 #include "model/Triage.h"
 

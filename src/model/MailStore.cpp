@@ -1,4 +1,5 @@
 #include "MailStore.h"
+#include <algorithm>
 #include "Triage.h"
 
 namespace ponymail {

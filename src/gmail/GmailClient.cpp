@@ -19,7 +19,7 @@ constexpr int kMaxAttempts = 3;
 GmailClient::GmailClient(OAuthManager* auth, QNetworkAccessManager* nam, QObject* parent)
     : QObject(parent), m_auth(auth), m_nam(nam) {}
 
-void GmailClient::rawRequest(const QByteArray& verb, const QString& path, const QUrlQuery* query,
+void GmailClient::rawRequest(const QByteArray& verb, const QString& path, const QUrlQuery& query,
                              const QByteArray& body, const QByteArray& contentType, BytesCallback cb, int attempt)
 {
     m_auth->withAccessToken([=](const QString& token, const QString& err) {
@@ -29,7 +29,7 @@ void GmailClient::rawRequest(const QByteArray& verb, const QString& path, const 
             return;
         }
         QUrl url(path.startsWith(QLatin1String("https://")) ? path : kBase + path);
-        if (query) url.setQuery(*query);
+        if (!query.isEmpty()) url.setQuery(query);
         QNetworkRequest req(url);
         req.setRawHeader("Authorization", "Bearer " + token.toUtf8());
         req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
@@ -78,7 +78,7 @@ void GmailClient::rawRequest(const QByteArray& verb, const QString& path, const 
     });
 }
 
-void GmailClient::request(const QByteArray& verb, const QString& path, const QUrlQuery* query,
+void GmailClient::request(const QByteArray& verb, const QString& path, const QUrlQuery& query,
                           const QByteArray& body, const QByteArray& contentType, JsonCallback cb)
 {
     rawRequest(verb, path, query, body, contentType, [cb](const QByteArray& data, int status, const QString& err) {
@@ -91,15 +91,15 @@ void GmailClient::request(const QByteArray& verb, const QString& path, const QUr
 static QByteArray jsonBody(const QJsonObject& o) { return QJsonDocument(o).toJson(QJsonDocument::Compact); }
 
 // --- profile / labels -------------------------------------------------------
-void GmailClient::getProfile(JsonCallback cb) { request("GET", QStringLiteral("profile"), nullptr, {}, {}, cb); }
-void GmailClient::listLabels(JsonCallback cb) { request("GET", QStringLiteral("labels"), nullptr, {}, {}, cb); }
-void GmailClient::getLabel(const QString& id, JsonCallback cb) { request("GET", QStringLiteral("labels/") + id, nullptr, {}, {}, cb); }
+void GmailClient::getProfile(JsonCallback cb) { request("GET", QStringLiteral("profile"), QUrlQuery(), {}, {}, cb); }
+void GmailClient::listLabels(JsonCallback cb) { request("GET", QStringLiteral("labels"), QUrlQuery(), {}, {}, cb); }
+void GmailClient::getLabel(const QString& id, JsonCallback cb) { request("GET", QStringLiteral("labels/") + id, QUrlQuery(), {}, {}, cb); }
 void GmailClient::createLabel(const QString& name, JsonCallback cb)
 {
     QJsonObject o{{QStringLiteral("name"), name},
                   {QStringLiteral("labelListVisibility"), QStringLiteral("labelShow")},
                   {QStringLiteral("messageListVisibility"), QStringLiteral("show")}};
-    request("POST", QStringLiteral("labels"), nullptr, jsonBody(o), "application/json", cb);
+    request("POST", QStringLiteral("labels"), QUrlQuery(), jsonBody(o), "application/json", cb);
 }
 
 // --- threads ----------------------------------------------------------------
@@ -111,19 +111,19 @@ void GmailClient::listThreads(const QString& query, const QStringList& labelIds,
     for (const auto& l : labelIds) q.addQueryItem(QStringLiteral("labelIds"), l);
     q.addQueryItem(QStringLiteral("maxResults"), QString::number(maxResults));
     if (!pageToken.isEmpty()) q.addQueryItem(QStringLiteral("pageToken"), pageToken);
-    request("GET", QStringLiteral("threads"), &q, {}, {}, cb);
+    request("GET", QStringLiteral("threads"), q, {}, {}, cb);
 }
 
 void GmailClient::getThread(const QString& threadId, JsonCallback cb)
 {
     QUrlQuery q; q.addQueryItem(QStringLiteral("format"), QStringLiteral("full"));
-    request("GET", QStringLiteral("threads/") + threadId, &q, {}, {}, cb);
+    request("GET", QStringLiteral("threads/") + threadId, q, {}, {}, cb);
 }
 
 void GmailClient::getThreadMetadata(const QString& threadId, JsonCallback cb)
 {
     QUrlQuery q; q.addQueryItem(QStringLiteral("format"), QStringLiteral("metadata"));
-    request("GET", QStringLiteral("threads/") + threadId, &q, {}, {}, cb);
+    request("GET", QStringLiteral("threads/") + threadId, q, {}, {}, cb);
 }
 
 void GmailClient::modifyThread(const QString& threadId, const QStringList& add, const QStringList& remove, JsonCallback cb)
@@ -131,15 +131,15 @@ void GmailClient::modifyThread(const QString& threadId, const QStringList& add, 
     QJsonObject o;
     if (!add.isEmpty()) o[QStringLiteral("addLabelIds")] = QJsonArray::fromStringList(add);
     if (!remove.isEmpty()) o[QStringLiteral("removeLabelIds")] = QJsonArray::fromStringList(remove);
-    request("POST", QStringLiteral("threads/%1/modify").arg(threadId), nullptr, jsonBody(o), "application/json", cb);
+    request("POST", QStringLiteral("threads/%1/modify").arg(threadId), QUrlQuery(), jsonBody(o), "application/json", cb);
 }
 
 void GmailClient::trashThread(const QString& threadId, JsonCallback cb)
-{ request("POST", QStringLiteral("threads/%1/trash").arg(threadId), nullptr, {}, {}, cb); }
+{ request("POST", QStringLiteral("threads/%1/trash").arg(threadId), QUrlQuery(), {}, {}, cb); }
 void GmailClient::untrashThread(const QString& threadId, JsonCallback cb)
-{ request("POST", QStringLiteral("threads/%1/untrash").arg(threadId), nullptr, {}, {}, cb); }
+{ request("POST", QStringLiteral("threads/%1/untrash").arg(threadId), QUrlQuery(), {}, {}, cb); }
 void GmailClient::deleteThread(const QString& threadId, JsonCallback cb)
-{ request("DELETE", QStringLiteral("threads/") + threadId, nullptr, {}, {}, cb); }
+{ request("DELETE", QStringLiteral("threads/") + threadId, QUrlQuery(), {}, {}, cb); }
 
 // --- messages ---------------------------------------------------------------
 void GmailClient::listMessages(const QString& query, const QStringList& labelIds, int maxResults,
@@ -150,13 +150,13 @@ void GmailClient::listMessages(const QString& query, const QStringList& labelIds
     for (const auto& l : labelIds) q.addQueryItem(QStringLiteral("labelIds"), l);
     q.addQueryItem(QStringLiteral("maxResults"), QString::number(maxResults));
     if (!pageToken.isEmpty()) q.addQueryItem(QStringLiteral("pageToken"), pageToken);
-    request("GET", QStringLiteral("messages"), &q, {}, {}, cb);
+    request("GET", QStringLiteral("messages"), q, {}, {}, cb);
 }
 
 void GmailClient::getMessage(const QString& messageId, JsonCallback cb)
 {
     QUrlQuery q; q.addQueryItem(QStringLiteral("format"), QStringLiteral("full"));
-    request("GET", QStringLiteral("messages/") + messageId, &q, {}, {}, cb);
+    request("GET", QStringLiteral("messages/") + messageId, q, {}, {}, cb);
 }
 
 void GmailClient::modifyMessage(const QString& messageId, const QStringList& add, const QStringList& remove, JsonCallback cb)
@@ -164,30 +164,30 @@ void GmailClient::modifyMessage(const QString& messageId, const QStringList& add
     QJsonObject o;
     if (!add.isEmpty()) o[QStringLiteral("addLabelIds")] = QJsonArray::fromStringList(add);
     if (!remove.isEmpty()) o[QStringLiteral("removeLabelIds")] = QJsonArray::fromStringList(remove);
-    request("POST", QStringLiteral("messages/%1/modify").arg(messageId), nullptr, jsonBody(o), "application/json", cb);
+    request("POST", QStringLiteral("messages/%1/modify").arg(messageId), QUrlQuery(), jsonBody(o), "application/json", cb);
 }
 
 void GmailClient::trashMessage(const QString& messageId, JsonCallback cb)
-{ request("POST", QStringLiteral("messages/%1/trash").arg(messageId), nullptr, {}, {}, cb); }
+{ request("POST", QStringLiteral("messages/%1/trash").arg(messageId), QUrlQuery(), {}, {}, cb); }
 void GmailClient::deleteMessage(const QString& messageId, JsonCallback cb)
-{ request("DELETE", QStringLiteral("messages/") + messageId, nullptr, {}, {}, cb); }
+{ request("DELETE", QStringLiteral("messages/") + messageId, QUrlQuery(), {}, {}, cb); }
 
 void GmailClient::batchDeleteMessages(const QStringList& ids, JsonCallback cb)
 {
     QJsonObject o{{QStringLiteral("ids"), QJsonArray::fromStringList(ids)}};
-    request("POST", QStringLiteral("messages/batchDelete"), nullptr, jsonBody(o), "application/json", cb);
+    request("POST", QStringLiteral("messages/batchDelete"), QUrlQuery(), jsonBody(o), "application/json", cb);
 }
 
 void GmailClient::getAttachment(const QString& messageId, const QString& attachmentId, BytesCallback cb)
 {
-    rawRequest("GET", QStringLiteral("messages/%1/attachments/%2").arg(messageId, attachmentId), nullptr, {}, {}, cb, 0);
+    rawRequest("GET", QStringLiteral("messages/%1/attachments/%2").arg(messageId, attachmentId), QUrlQuery(), {}, {}, cb, 0);
 }
 
 void GmailClient::sendMessage(const QByteArray& rawBase64Url, const QString& threadId, JsonCallback cb)
 {
     QJsonObject o{{QStringLiteral("raw"), QString::fromLatin1(rawBase64Url)}};
     if (!threadId.isEmpty()) o[QStringLiteral("threadId")] = threadId;
-    request("POST", QStringLiteral("messages/send"), nullptr, jsonBody(o), "application/json", cb);
+    request("POST", QStringLiteral("messages/send"), QUrlQuery(), jsonBody(o), "application/json", cb);
 }
 
 // --- drafts -----------------------------------------------------------------
@@ -196,13 +196,13 @@ void GmailClient::listDrafts(int maxResults, const QString& pageToken, JsonCallb
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("maxResults"), QString::number(maxResults));
     if (!pageToken.isEmpty()) q.addQueryItem(QStringLiteral("pageToken"), pageToken);
-    request("GET", QStringLiteral("drafts"), &q, {}, {}, cb);
+    request("GET", QStringLiteral("drafts"), q, {}, {}, cb);
 }
 
 void GmailClient::getDraft(const QString& draftId, JsonCallback cb)
 {
     QUrlQuery q; q.addQueryItem(QStringLiteral("format"), QStringLiteral("full"));
-    request("GET", QStringLiteral("drafts/") + draftId, &q, {}, {}, cb);
+    request("GET", QStringLiteral("drafts/") + draftId, q, {}, {}, cb);
 }
 
 void GmailClient::createDraft(const QByteArray& rawBase64Url, const QString& threadId, JsonCallback cb)
@@ -210,7 +210,7 @@ void GmailClient::createDraft(const QByteArray& rawBase64Url, const QString& thr
     QJsonObject msg{{QStringLiteral("raw"), QString::fromLatin1(rawBase64Url)}};
     if (!threadId.isEmpty()) msg[QStringLiteral("threadId")] = threadId;
     QJsonObject o{{QStringLiteral("message"), msg}};
-    request("POST", QStringLiteral("drafts"), nullptr, jsonBody(o), "application/json", cb);
+    request("POST", QStringLiteral("drafts"), QUrlQuery(), jsonBody(o), "application/json", cb);
 }
 
 void GmailClient::updateDraft(const QString& draftId, const QByteArray& rawBase64Url, const QString& threadId, JsonCallback cb)
@@ -218,16 +218,16 @@ void GmailClient::updateDraft(const QString& draftId, const QByteArray& rawBase6
     QJsonObject msg{{QStringLiteral("raw"), QString::fromLatin1(rawBase64Url)}};
     if (!threadId.isEmpty()) msg[QStringLiteral("threadId")] = threadId;
     QJsonObject o{{QStringLiteral("id"), draftId}, {QStringLiteral("message"), msg}};
-    request("PUT", QStringLiteral("drafts/") + draftId, nullptr, jsonBody(o), "application/json", cb);
+    request("PUT", QStringLiteral("drafts/") + draftId, QUrlQuery(), jsonBody(o), "application/json", cb);
 }
 
 void GmailClient::deleteDraft(const QString& draftId, JsonCallback cb)
-{ request("DELETE", QStringLiteral("drafts/") + draftId, nullptr, {}, {}, cb); }
+{ request("DELETE", QStringLiteral("drafts/") + draftId, QUrlQuery(), {}, {}, cb); }
 
 void GmailClient::sendDraft(const QString& draftId, JsonCallback cb)
 {
     QJsonObject o{{QStringLiteral("id"), draftId}};
-    request("POST", QStringLiteral("drafts/send"), nullptr, jsonBody(o), "application/json", cb);
+    request("POST", QStringLiteral("drafts/send"), QUrlQuery(), jsonBody(o), "application/json", cb);
 }
 
 // --- history ----------------------------------------------------------------
@@ -237,7 +237,7 @@ void GmailClient::listHistory(const QString& startHistoryId, const QString& page
     q.addQueryItem(QStringLiteral("startHistoryId"), startHistoryId);
     q.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("500"));
     if (!pageToken.isEmpty()) q.addQueryItem(QStringLiteral("pageToken"), pageToken);
-    request("GET", QStringLiteral("history"), &q, {}, {}, cb);
+    request("GET", QStringLiteral("history"), q, {}, {}, cb);
 }
 
 } // namespace ponymail

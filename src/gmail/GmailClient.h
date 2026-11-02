@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QStringList>
 #include <QNetworkAccessManager>
+#include <QUrlQuery>
 #include <functional>
 
 namespace ponymail {
@@ -66,9 +67,9 @@ Q_SIGNALS:
     void authExpired();
 
 private:
-    void request(const QByteArray& verb, const QString& path, const QUrlQuery* query,
+    void request(const QByteArray& verb, const QString& path, const QUrlQuery& query,
                  const QByteArray& body, const QByteArray& contentType, JsonCallback cb);
-    void rawRequest(const QByteArray& verb, const QString& path, const QUrlQuery* query,
+    void rawRequest(const QByteArray& verb, const QString& path, const QUrlQuery& query,
                     const QByteArray& body, const QByteArray& contentType, BytesCallback cb, int attempt);
 
     OAuthManager* m_auth;

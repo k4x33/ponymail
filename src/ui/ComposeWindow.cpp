@@ -1,4 +1,5 @@
 #include "ComposeWindow.h"
+#include <algorithm>
 #include "RecipientField.h"
 #include "AiDialog.h"
 #include "Icons.h"

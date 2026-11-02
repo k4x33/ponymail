@@ -1,4 +1,5 @@
 #include "SenderResolver.h"
+#include <algorithm>
 
 namespace ponymail {
 

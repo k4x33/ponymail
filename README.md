@@ -55,7 +55,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 .\build\ponymail_tests.exe
 mkdir dist; copy build\PonyMail.exe dist\
-windeployqt --release --no-translations dist\PonyMail.exe
+windeployqt --release dist\PonyMail.exe
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=1.0.0 /DSourceDir="$PWD\dist" installer\ponymail.iss
 ```
 

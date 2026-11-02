@@ -1,4 +1,7 @@
 #include "MainWindow.h"
+#include <memory>
+#include <functional>
+#include <algorithm>
 #include "NavRail.h"
 #include "MessageListModel.h"
 #include "MessageListView.h"

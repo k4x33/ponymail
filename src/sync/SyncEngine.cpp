@@ -1,4 +1,5 @@
 #include "SyncEngine.h"
+#include <algorithm>
 #include "gmail/GmailClient.h"
 #include "gmail/MimeMessage.h"
 #include "storage/Database.h"

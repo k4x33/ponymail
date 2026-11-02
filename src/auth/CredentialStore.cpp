@@ -1,4 +1,5 @@
 #include "CredentialStore.h"
+#include <string>
 #include "core/Paths.h"
 
 #ifdef Q_OS_WIN

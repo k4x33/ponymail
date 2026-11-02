@@ -1,4 +1,5 @@
 #include "MimeMessage.h"
+#include <algorithm>
 #include <QJsonArray>
 #include <QRegularExpression>
 #include <QDateTime>
