@@ -131,7 +131,8 @@ void ClaudeClient::summarizeThread(const Thread& thread, const QString& userName
     if (systemPrompt.isEmpty()) {
         systemPrompt = QStringLiteral(
             "You are an executive email triage assistant for %1 (<%2>), who is also addressed as \"Mike\" or \"Brophy\".\n"
-            "Analyse the email thread and respond with ONLY a strict JSON object (no prose, no markdown fences, no comments) with exactly these keys:\n"
+            "Analyse the email thread and respond with ONLY a strict JSON object: the first character of your reply must be '{' and the last '}'. "
+            "No prose, no markdown fences, no comments. Exactly these keys:\n"
             "  bullets: array of 1 to 5 strings summarising the thread (never more than 5).\n"
             "  actions: array of objects, one per explicit request, question or task in the thread; each object has keys "
             "text (string), for_user (boolean) and owner (string: name or role of who must act).\n"
@@ -145,7 +146,7 @@ void ClaudeClient::summarizeThread(const Thread& thread, const QString& userName
             "- Omit an action when it is already resolved later in the thread.").arg(userName, userEmail);
     }
 
-    complete(systemPrompt, QStringLiteral("Thread subject: %1\n\n%2").arg(thread.subject(), convo), 1200, QStringLiteral("{"),
+    complete(systemPrompt, QStringLiteral("Thread subject: %1\n\n%2").arg(thread.subject(), convo), 1200,
         [cb, tid = thread.id, mid = thread.latestMessageId()](const QString& text, const QString& err) {
             if (!err.isEmpty()) { cb({}, err); return; }
             QString perr;
@@ -179,7 +180,7 @@ void ClaudeClient::draftEmail(const DraftRequest& req, std::function<void(const 
     if (!req.subject.isEmpty()) user += QStringLiteral("CURRENT SUBJECT: %1\n\n").arg(req.subject);
     if (!req.threadContext.isEmpty()) user += QStringLiteral("CONVERSATION CONTEXT:\n%1\n").arg(req.threadContext.right(16000));
 
-    complete(system, user, 1500, QStringLiteral("{"), [cb](const QString& text, const QString& err) {
+    complete(system, user, 1500, [cb](const QString& text, const QString& err) {
         if (!err.isEmpty()) { cb({}, err); return; }
         const QJsonObject o = parseJsonObject(text, nullptr);
         DraftResult r;
