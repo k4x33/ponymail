@@ -15,7 +15,8 @@ namespace {
 constexpr int kPollNormalMs = 30'000;
 constexpr int kPollBackoffMs = 120'000;
 constexpr int kPageSize = 50;
-constexpr int kMaxParallelThreadFetches = 4;
+constexpr int kMaxParallelThreadFetches = 3;
+constexpr int kRateLimitPauseMs = 20'000;
 }
 
 SyncEngine::SyncEngine(GmailClient* gmail, MailStore* store, Database* db, Settings* settings, QObject* parent)
@@ -157,6 +158,7 @@ void SyncEngine::loadMoreActiveFolder()
 {
     const QString tok = m_store->folderPageToken(m_activeFolder.key);
     if (tok.isEmpty()) return;
+    if (m_loadingPages.contains(m_activeFolder.key)) return;   // a page is already in flight
     fetchFolderPage(m_activeFolder, tok, false);
 }
 
@@ -172,6 +174,8 @@ void SyncEngine::fetchFolderPage(const Folder& f, const QString& pageToken, bool
         return;
     }
 
+    if (m_loadingPages.contains(folder.key) && !reset) return;
+    m_loadingPages.insert(folder.key);
     Q_EMIT folderLoading(folder.key, true);
     Q_EMIT syncStateChanged(true, m_rateLimited);
     QString query = folder.query;
@@ -180,6 +184,7 @@ void SyncEngine::fetchFolderPage(const Folder& f, const QString& pageToken, bool
     m_gmail->listThreads(query, folder.labelIds, kPageSize, pageToken,
         [this, folder, reset](const QJsonObject& o, int status, const QString& err) {
             if (status != 200) {
+                m_loadingPages.remove(folder.key);
                 Q_EMIT folderLoading(folder.key, false);
                 Q_EMIT syncStateChanged(false, m_rateLimited);
                 Q_EMIT errorOccurred(QStringLiteral("List threads: ") + err);
@@ -196,8 +201,11 @@ void SyncEngine::fetchFolderPage(const Folder& f, const QString& pageToken, bool
             }
             m_store->setFolderPageToken(folder.key, o.value(QStringLiteral("nextPageToken")).toString());
             if (folder.key == QLatin1String("inbox")) for (const auto& id : ids) m_knownInboxThreads.insert(id);
-            fetchThreads(needFetch, [this, folder, ids, reset]() {
-                m_store->setFolderThreadIds(folder.key, ids, !reset);
+            // Show the rows we already have immediately; stale ones refresh as they arrive.
+            m_store->setFolderThreadIds(folder.key, ids, !reset);
+            fetchThreads(needFetch, [this, folder, ids]() {
+                m_loadingPages.remove(folder.key);
+                m_store->setFolderThreadIds(folder.key, ids, true);
                 Q_EMIT folderLoading(folder.key, false);
                 Q_EMIT syncStateChanged(false, m_rateLimited);
             });
@@ -212,7 +220,12 @@ void SyncEngine::fetchThreads(const QStringList& ids, std::function<void()> done
     auto inflight = std::make_shared<int>(0);
     auto pump = std::make_shared<std::function<void()>>();
     *pump = [this, remaining, queue, inflight, pump, done]() {
-        while (*inflight < kMaxParallelThreadFetches && !queue->isEmpty()) {
+        if (m_rateLimited && *inflight == 0 && !queue->isEmpty()) {
+            // Back off the thread-fetch pump too, not only the poll timer.
+            QTimer::singleShot(kRateLimitPauseMs, this, [pump]() { (*pump)(); });
+            return;
+        }
+        while (*inflight < kMaxParallelThreadFetches && !queue->isEmpty() && !m_rateLimited) {
             const QString id = queue->takeFirst();
             ++*inflight;
             fetchThread(id, [remaining, inflight, pump, done](bool) {
@@ -521,13 +534,10 @@ void SyncEngine::emptyFolder(const QString& folderKey, std::function<void(int, c
 
 void SyncEngine::afterSend()
 {
-    auto sweep = [this]() {
-        if (m_activeFolder.key == QLatin1String("sent")) refreshActiveFolder(true);
-        pollNow();
-    };
-    sweep();
-    QTimer::singleShot(3000, this, sweep);
-    QTimer::singleShot(10000, this, sweep);
+    // history.list is 2 units; it picks up the new Sent message and refreshes only that thread.
+    pollNow();
+    QTimer::singleShot(3000, this, [this]() { pollNow(); });
+    QTimer::singleShot(10000, this, [this]() { pollNow(); if (m_activeFolder.key == QLatin1String("sent")) refreshActiveFolder(true); });
 }
 
 } // namespace ponymail

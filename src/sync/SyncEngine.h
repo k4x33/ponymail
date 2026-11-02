@@ -92,6 +92,7 @@ private:
     int m_inflightThreadFetches = 0;
     QStringList m_fetchQueue;
     QSet<QString> m_knownInboxThreads;
+    QSet<QString> m_loadingPages;   // folder keys with a page request in flight
 };
 
 } // namespace ponymail
