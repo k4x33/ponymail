@@ -12,6 +12,7 @@ class QToolButton;
 class QSplitter;
 class QLabel;
 class QAction;
+class QMenu;
 
 namespace ponymail {
 
@@ -67,6 +68,7 @@ private:
 
     NavRail* m_nav; MessageListModel* m_model; MessageListView* m_list; ReadingPane* m_reading; QSplitter* m_splitter;
     QLineEdit* m_search; QComboBox* m_filter; QToolButton* m_unreadToggle; QLabel* m_syncLabel; QLabel* m_listTitle; QLabel* m_zoomLabel;
+    QMenu* m_snoozeMenu = nullptr;
     QAction *m_replyA, *m_replyAllA, *m_forwardA, *m_deleteA, *m_archiveA, *m_snoozeA, *m_blockA, *m_readA, *m_starA, *m_aiA;
     Theme m_theme = Theme::light();
     Folder m_folderBeforeSearch;

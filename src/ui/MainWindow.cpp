@@ -169,6 +169,7 @@ void MainWindow::buildUi()
         if (dlg.exec() == QDialog::Accepted) snoozeSelected(edit->dateTime().toMSecsSinceEpoch());
     });
     m_snoozeA->setMenu(snoozeMenu);
+    m_snoozeMenu = snoozeMenu;
     if (auto* btn = qobject_cast<QToolButton*>(tb->widgetForAction(m_snoozeA))) btn->setPopupMode(QToolButton::InstantPopup);
 
     // --- three panes ---
@@ -294,6 +295,33 @@ void MainWindow::connectSignals()
     });
     connect(m_list, &MessageListView::visibleRangeChanged, this, [this](int, int) { prefetchVisible(); });
     connect(m_list, &MessageListView::reachedBottom, this, [this]() { m_sync->loadMoreActiveFolder(); });
+    m_list->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_list, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        const QModelIndex idx = m_list->indexAt(pos);
+        if (!idx.isValid()) return;
+        if (!m_list->selectionModel()->isSelected(idx)) m_list->selectionModel()->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect);
+        else m_list->selectionModel()->setCurrentIndex(idx, QItemSelectionModel::Current);
+        const QStringList ids = m_list->selectedThreadIds();
+        bool anyUnread = false, anyStarred = false;
+        for (const auto& id : ids) if (const Thread* t = m_store->thread(id)) { anyUnread |= t->isUnread(); anyStarred |= t->isStarred(); }
+        QMenu menu(this);
+        menu.addAction(m_replyA); menu.addAction(m_replyAllA); menu.addAction(m_forwardA);
+        menu.addSeparator();
+        menu.addAction(m_deleteA); menu.addAction(m_archiveA);
+        QAction* snooze = menu.addMenu(m_snoozeMenu)->menu()->menuAction();
+        snooze->setText(QStringLiteral("Snooze"));
+        snooze->setIcon(m_snoozeA->icon());
+        menu.addAction(m_blockA);
+        menu.addSeparator();
+        m_readA->setText(anyUnread ? QStringLiteral("Mark as read") : QStringLiteral("Mark as unread"));
+        m_starA->setText(anyStarred ? QStringLiteral("Remove star") : QStringLiteral("Star"));
+        menu.addAction(m_readA); menu.addAction(m_starA);
+        menu.addSeparator();
+        menu.addAction(m_aiA);
+        menu.exec(m_list->viewport()->mapToGlobal(pos));
+        m_readA->setText(QStringLiteral("Read / Unread"));
+        m_starA->setText(QStringLiteral("Star"));
+    });
     connect(m_list, &MessageListView::rowActivated, this, [this](const QString& id) {
         if (const Thread* t = m_store->thread(id)) if (t->hasLabel(QStringLiteral("DRAFT")) && t->latest()) openDraft(id, t->latest()->id);
     });
@@ -508,11 +536,7 @@ void MainWindow::onSelectionChanged()
         const QString id = selectedThreadId().isEmpty() ? ids.first() : selectedThreadId();
         m_reading->showThread(id);
         m_queue->enqueueFront(id);
-        // Opening a thread marks it read after a short dwell.
-        QTimer::singleShot(1200, this, [this, id]() {
-            if (selectedThreadId() != id) return;
-            if (const Thread* t = m_store->thread(id)) if (t->isUnread()) m_sync->markRead({id}, true);
-        });
+        // Selecting a thread never changes its read state; marking read is always an explicit user action.
     } else if (!any) {
         m_reading->clear();
     }
