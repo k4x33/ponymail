@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QRegularExpression>
+#include <QDebug>
 
 namespace ponymail {
 
@@ -24,6 +25,11 @@ void ClaudeClient::setApiKey(const QString& key) { CredentialStore::write(kKey, 
 
 void ClaudeClient::complete(const QString& system, const QString& user, int maxTokens, TextCallback cb)
 {
+    complete(system, user, maxTokens, QString(), std::move(cb));
+}
+
+void ClaudeClient::complete(const QString& system, const QString& user, int maxTokens, const QString& assistantPrefill, TextCallback cb)
+{
     const QString key = CredentialStore::read(kKey);
     if (key.isEmpty()) { cb({}, QStringLiteral("Claude API key not configured (Settings → Account).")); return; }
 
@@ -31,8 +37,10 @@ void ClaudeClient::complete(const QString& system, const QString& user, int maxT
     body[QStringLiteral("model")] = m_settings->aiModel();
     body[QStringLiteral("max_tokens")] = maxTokens;
     body[QStringLiteral("system")] = system;
-    body[QStringLiteral("messages")] = QJsonArray{QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
-                                                              {QStringLiteral("content"), user}}};
+    QJsonArray messages{QJsonObject{{QStringLiteral("role"), QStringLiteral("user")}, {QStringLiteral("content"), user}}};
+    if (!assistantPrefill.isEmpty())
+        messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("assistant")}, {QStringLiteral("content"), assistantPrefill}});
+    body[QStringLiteral("messages")] = messages;
 
     QNetworkRequest req{QUrl(kEndpoint)};
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
@@ -41,7 +49,7 @@ void ClaudeClient::complete(const QString& system, const QString& user, int maxT
     req.setTransferTimeout(90000);
 
     QNetworkReply* reply = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [reply, cb]() {
+    connect(reply, &QNetworkReply::finished, this, [reply, cb, assistantPrefill]() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
         const QString netErr = reply->error() == QNetworkReply::NoError ? QString() : reply->errorString();
@@ -52,7 +60,7 @@ void ClaudeClient::complete(const QString& system, const QString& user, int maxT
             cb({}, err);
             return;
         }
-        QString text;
+        QString text = assistantPrefill;   // the model continues from the prefill
         for (const auto v : o.value(QStringLiteral("content")).toArray()) {
             const auto c = v.toObject();
             if (c.value(QStringLiteral("type")).toString() == QLatin1String("text")) text += c.value(QStringLiteral("text")).toString();
@@ -61,12 +69,46 @@ void ClaudeClient::complete(const QString& system, const QString& user, int maxT
     });
 }
 
-QString ClaudeClient::extractJson(const QString& text)
+QString ClaudeClient::extractJson(const QString& textIn)
 {
+    QString text = textIn;
+    // Drop ```json fences if present.
+    text.remove(QRegularExpression(QStringLiteral("```[a-zA-Z]*")));
     const int a = text.indexOf('{');
     const int b = text.lastIndexOf('}');
     if (a < 0 || b <= a) return {};
-    return text.mid(a, b - a + 1);
+    text = text.mid(a, b - a + 1);
+    // Strip // comments that are outside string literals, and trailing commas.
+    QString out;
+    bool inStr = false;
+    for (int i = 0; i < text.size(); ++i) {
+        const QChar c = text[i];
+        if (inStr) {
+            out += c;
+            if (c == '\\' && i + 1 < text.size()) { out += text[++i]; continue; }
+            if (c == '"') inStr = false;
+            continue;
+        }
+        if (c == '"') { inStr = true; out += c; continue; }
+        if (c == '/' && i + 1 < text.size() && text[i + 1] == '/') {
+            while (i < text.size() && text[i] != '\n') ++i;
+            continue;
+        }
+        out += c;
+    }
+    out.replace(QRegularExpression(QStringLiteral(",\\s*([}\\]])")), QStringLiteral("\\1"));
+    return out;
+}
+
+QJsonObject ClaudeClient::parseJsonObject(const QString& text, QString* error)
+{
+    const QString json = extractJson(text);
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8(), &pe);
+    if (doc.isObject()) return doc.object();
+    if (error) *error = pe.error == QJsonParseError::NoError ? QStringLiteral("no JSON object found") : pe.errorString();
+    qWarning().noquote() << "Claude: unparseable response:" << text.left(2000);
+    return {};
 }
 
 void ClaudeClient::summarizeThread(const Thread& thread, const QString& userName, const QString& userEmail, SummaryCallback cb)
@@ -89,14 +131,12 @@ void ClaudeClient::summarizeThread(const Thread& thread, const QString& userName
     if (systemPrompt.isEmpty()) {
         systemPrompt = QStringLiteral(
             "You are an executive email triage assistant for %1 (<%2>), who is also addressed as \"Mike\" or \"Brophy\".\n"
-            "Analyse the email thread and respond with ONLY a JSON object, no prose, in this exact shape:\n"
-            "{\n"
-            "  \"bullets\": [\"...\"],            // 1 to 5 concise bullets summarising the thread; never more than 5\n"
-            "  \"actions\": [                      // every explicit request, question or task found in the thread\n"
-            "    {\"text\": \"...\", \"for_user\": true|false, \"owner\": \"name or role\"}\n"
-            "  ],\n"
-            "  \"follow_up\": true|false           // true when the latest message is someone answering a task or question that %1 previously asked of them\n"
-            "}\n"
+            "Analyse the email thread and respond with ONLY a strict JSON object (no prose, no markdown fences, no comments) with exactly these keys:\n"
+            "  bullets: array of 1 to 5 strings summarising the thread (never more than 5).\n"
+            "  actions: array of objects, one per explicit request, question or task in the thread; each object has keys "
+            "text (string), for_user (boolean) and owner (string: name or role of who must act).\n"
+            "  follow_up: boolean, true when the latest message is someone answering a task or question that %1 previously asked of them.\n"
+            "Example: {\"bullets\":[\"Budget approved for Q3\"],\"actions\":[{\"text\":\"Send revised deck\",\"for_user\":true,\"owner\":\"Mike\"}],\"follow_up\":false}\n"
             "Rules:\n"
             "- for_user is true only when the request is directed at %1 (by name, by 'you' in a message addressed to him, or as the clear recipient).\n"
             "- Messages written BY %1 never create actions for him; requests he makes of others are actions for those others.\n"
@@ -105,14 +145,13 @@ void ClaudeClient::summarizeThread(const Thread& thread, const QString& userName
             "- Omit an action when it is already resolved later in the thread.").arg(userName, userEmail);
     }
 
-    complete(systemPrompt, QStringLiteral("Thread subject: %1\n\n%2").arg(thread.subject(), convo), 1200,
+    complete(systemPrompt, QStringLiteral("Thread subject: %1\n\n%2").arg(thread.subject(), convo), 1200, QStringLiteral("{"),
         [cb, tid = thread.id, mid = thread.latestMessageId()](const QString& text, const QString& err) {
             if (!err.isEmpty()) { cb({}, err); return; }
-            const QString json = extractJson(text);
-            QJsonParseError pe;
-            const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8(), &pe);
-            if (!doc.isObject()) { cb({}, QStringLiteral("Model returned non-JSON output.")); return; }
-            cb(ThreadSummary::fromJson(tid, mid, doc.object()), {});
+            QString perr;
+            const QJsonObject o = parseJsonObject(text, &perr);
+            if (o.isEmpty()) { cb({}, QStringLiteral("Model returned non-JSON output (%1).").arg(perr)); return; }
+            cb(ThreadSummary::fromJson(tid, mid, o), {});
         });
 }
 
@@ -129,7 +168,7 @@ void ClaudeClient::draftEmail(const DraftRequest& req, std::function<void(const 
         "The user's DIRECTION NOTES are raw thoughts: never copy them verbatim. Polish, rewrite and expand them into "
         "professional, natural prose in the user's voice.\n"
         "Writing style requirements from the user (follow strictly):\n%3\n\n"
-        "Respond with ONLY a JSON object: {\"subject\": \"...\", \"body_html\": \"...\"}.\n"
+        "Respond with ONLY a strict JSON object with two string keys, subject and body_html. No markdown fences, no comments.\n"
         "body_html is simple HTML using <p>, <ul>, <li>, <b> only; no <html>/<body> wrappers, no signature block, no quoted thread.\n"
         "%4")
         .arg(req.userName, modeText,
@@ -140,13 +179,13 @@ void ClaudeClient::draftEmail(const DraftRequest& req, std::function<void(const 
     if (!req.subject.isEmpty()) user += QStringLiteral("CURRENT SUBJECT: %1\n\n").arg(req.subject);
     if (!req.threadContext.isEmpty()) user += QStringLiteral("CONVERSATION CONTEXT:\n%1\n").arg(req.threadContext.right(16000));
 
-    complete(system, user, 1500, [cb](const QString& text, const QString& err) {
+    complete(system, user, 1500, QStringLiteral("{"), [cb](const QString& text, const QString& err) {
         if (!err.isEmpty()) { cb({}, err); return; }
-        const QJsonDocument doc = QJsonDocument::fromJson(extractJson(text).toUtf8());
+        const QJsonObject o = parseJsonObject(text, nullptr);
         DraftResult r;
-        if (doc.isObject()) {
-            r.subject = doc.object().value(QStringLiteral("subject")).toString();
-            r.bodyHtml = doc.object().value(QStringLiteral("body_html")).toString();
+        if (!o.isEmpty()) {
+            r.subject = o.value(QStringLiteral("subject")).toString();
+            r.bodyHtml = o.value(QStringLiteral("body_html")).toString();
         }
         if (r.bodyHtml.isEmpty()) {
             // Fall back to treating the whole response as prose.

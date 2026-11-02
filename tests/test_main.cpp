@@ -4,6 +4,7 @@
 #include "gmail/MimeMessage.h"
 #include "gmail/MimeBuilder.h"
 #include "storage/Database.h"
+#include "ai/ClaudeClient.h"
 #include "core/Util.h"
 #include <QTemporaryDir>
 
@@ -221,6 +222,21 @@ private Q_SLOTS:
         QVERIFY(raw.contains("Content-Disposition: attachment; filename=\"deck.pdf\""));
         QVERIFY(!raw.contains("X-Confirm-Reading-To"));   // no read receipts, ever
         QVERIFY(!raw.contains("Disposition-Notification-To"));
+    }
+
+    // ---------------- Claude JSON recovery ----------------
+    void claude_json_recovery()
+    {
+        const QString fenced = QStringLiteral("Here you go:\n```json\n{\n  \"bullets\": [\"a\", \"b\",], // notes\n  \"actions\": [], // none\n  \"follow_up\": false,\n}\n```");
+        QString err;
+        const QJsonObject o = ClaudeClient::parseJsonObject(fenced, &err);
+        QVERIFY2(!o.isEmpty(), qPrintable(err));
+        QCOMPARE(o.value(QStringLiteral("bullets")).toArray().size(), 2);
+        QCOMPARE(o.value(QStringLiteral("follow_up")).toBool(true), false);
+        // Comment markers inside strings survive.
+        const QJsonObject u = ClaudeClient::parseJsonObject(QStringLiteral("{\"bullets\":[\"see https://x.y/path // not a comment\"],\"actions\":[],\"follow_up\":false}"), &err);
+        QCOMPARE(u.value(QStringLiteral("bullets")).toArray().first().toString(), QStringLiteral("see https://x.y/path // not a comment"));
+        QVERIFY(ClaudeClient::parseJsonObject(QStringLiteral("I cannot summarise this."), &err).isEmpty());
     }
 
     // ---------------- SQLite storage ----------------

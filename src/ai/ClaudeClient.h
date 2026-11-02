@@ -38,9 +38,13 @@ public:
     void draftEmail(const DraftRequest& req, std::function<void(const DraftResult&, const QString& error)> cb);
 
     void complete(const QString& system, const QString& user, int maxTokens, TextCallback cb);
+    void complete(const QString& system, const QString& user, int maxTokens, const QString& assistantPrefill, TextCallback cb);
+
+    // Lenient JSON recovery: strips fences, // comments and trailing commas.
+    static QString extractJson(const QString& text);
+    static QJsonObject parseJsonObject(const QString& text, QString* error);
 
 private:
-    static QString extractJson(const QString& text);
     Settings* m_settings;
     QNetworkAccessManager* m_nam;
 };
