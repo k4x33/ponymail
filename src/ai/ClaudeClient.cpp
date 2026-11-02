@@ -69,6 +69,61 @@ void ClaudeClient::complete(const QString& system, const QString& user, int maxT
     });
 }
 
+void ClaudeClient::completeStructured(const QString& system, const QString& user, const QString& toolName,
+                                      const QString& toolDescription, const QJsonObject& inputSchema, int maxTokens, JsonCallback cb)
+{
+    const QString key = CredentialStore::read(kKey);
+    if (key.isEmpty()) { cb({}, QStringLiteral("Claude API key not configured (Settings → Account & AI).")); return; }
+
+    QJsonObject body;
+    body[QStringLiteral("model")] = m_settings->aiModel();
+    body[QStringLiteral("max_tokens")] = maxTokens;
+    body[QStringLiteral("system")] = system;
+    body[QStringLiteral("messages")] = QJsonArray{QJsonObject{{QStringLiteral("role"), QStringLiteral("user")}, {QStringLiteral("content"), user}}};
+    body[QStringLiteral("tools")] = QJsonArray{QJsonObject{{QStringLiteral("name"), toolName},
+                                                           {QStringLiteral("description"), toolDescription},
+                                                           {QStringLiteral("input_schema"), inputSchema}}};
+    // Forcing the tool makes the API hand back a parsed object; no text parsing involved.
+    body[QStringLiteral("tool_choice")] = QJsonObject{{QStringLiteral("type"), QStringLiteral("tool")}, {QStringLiteral("name"), toolName}};
+
+    QNetworkRequest req{QUrl(kEndpoint)};
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setRawHeader("x-api-key", key.toUtf8());
+    req.setRawHeader("anthropic-version", "2023-06-01");
+    req.setTransferTimeout(90000);
+
+    QNetworkReply* reply = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [reply, cb, toolName]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray raw = reply->readAll();
+        const QJsonObject o = QJsonDocument::fromJson(raw).object();
+        const QString netErr = reply->error() == QNetworkReply::NoError ? QString() : reply->errorString();
+        reply->deleteLater();
+        if (status != 200) {
+            QString err = o.value(QStringLiteral("error")).toObject().value(QStringLiteral("message")).toString();
+            if (err.isEmpty()) err = netErr.isEmpty() ? QStringLiteral("Claude API HTTP %1").arg(status) : netErr;
+            cb({}, err);
+            return;
+        }
+        QString text;
+        for (const auto v : o.value(QStringLiteral("content")).toArray()) {
+            const auto c = v.toObject();
+            const QString type = c.value(QStringLiteral("type")).toString();
+            if (type == QLatin1String("tool_use") && c.value(QStringLiteral("name")).toString() == toolName) {
+                cb(c.value(QStringLiteral("input")).toObject(), {});
+                return;
+            }
+            if (type == QLatin1String("text")) text += c.value(QStringLiteral("text")).toString();
+        }
+        // Fallback: model answered in text anyway.
+        QString perr;
+        const QJsonObject parsed = parseJsonObject(text, &perr);
+        if (!parsed.isEmpty()) { cb(parsed, {}); return; }
+        qWarning().noquote() << "Claude: no tool_use block in response:" << QString::fromUtf8(raw.left(2000));
+        cb({}, QStringLiteral("Model did not return structured output (%1).").arg(perr));
+    });
+}
+
 QString ClaudeClient::extractJson(const QString& textIn)
 {
     QString text = textIn;
@@ -131,13 +186,8 @@ void ClaudeClient::summarizeThread(const Thread& thread, const QString& userName
     if (systemPrompt.isEmpty()) {
         systemPrompt = QStringLiteral(
             "You are an executive email triage assistant for %1 (<%2>), who is also addressed as \"Mike\" or \"Brophy\".\n"
-            "Analyse the email thread and respond with ONLY a strict JSON object: the first character of your reply must be '{' and the last '}'. "
-            "No prose, no markdown fences, no comments. Exactly these keys:\n"
-            "  bullets: array of 1 to 5 strings summarising the thread (never more than 5).\n"
-            "  actions: array of objects, one per explicit request, question or task in the thread; each object has keys "
-            "text (string), for_user (boolean) and owner (string: name or role of who must act).\n"
-            "  follow_up: boolean, true when the latest message is someone answering a task or question that %1 previously asked of them.\n"
-            "Example: {\"bullets\":[\"Budget approved for Q3\"],\"actions\":[{\"text\":\"Send revised deck\",\"for_user\":true,\"owner\":\"Mike\"}],\"follow_up\":false}\n"
+            "Analyse the email thread and record the result with the submit_summary tool: 1 to 5 bullets, every explicit request, "
+            "question or task as an action item, and whether the latest message is a follow-up (someone answering a task or question %1 previously asked of them).\n"
             "Rules:\n"
             "- for_user is true only when the request is directed at %1 (by name, by 'you' in a message addressed to him, or as the clear recipient).\n"
             "- Messages written BY %1 never create actions for him; requests he makes of others are actions for those others.\n"
@@ -146,12 +196,24 @@ void ClaudeClient::summarizeThread(const Thread& thread, const QString& userName
             "- Omit an action when it is already resolved later in the thread.").arg(userName, userEmail);
     }
 
-    complete(systemPrompt, QStringLiteral("Thread subject: %1\n\n%2").arg(thread.subject(), convo), 1200,
-        [cb, tid = thread.id, mid = thread.latestMessageId()](const QString& text, const QString& err) {
+    const QJsonObject schema = QJsonDocument::fromJson(R"JSON({
+      "type": "object",
+      "properties": {
+        "bullets": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"type": "string"}, "description": "1-5 terse bullets summarising the thread"},
+        "actions": {"type": "array", "items": {"type": "object", "properties": {
+            "text": {"type": "string"},
+            "for_user": {"type": "boolean", "description": "true only when the request is directed at the user"},
+            "owner": {"type": "string", "description": "name or role of who must act"}
+          }, "required": ["text", "for_user", "owner"]}},
+        "follow_up": {"type": "boolean", "description": "true when the latest message answers a task or question the user previously asked of them"}
+      },
+      "required": ["bullets", "actions", "follow_up"]
+    })JSON").object();
+
+    completeStructured(systemPrompt, QStringLiteral("Thread subject: %1\n\n%2").arg(thread.subject(), convo),
+        QStringLiteral("submit_summary"), QStringLiteral("Record the thread summary, action items and follow-up flag."), schema, 1200,
+        [cb, tid = thread.id, mid = thread.latestMessageId()](const QJsonObject& o, const QString& err) {
             if (!err.isEmpty()) { cb({}, err); return; }
-            QString perr;
-            const QJsonObject o = parseJsonObject(text, &perr);
-            if (o.isEmpty()) { cb({}, QStringLiteral("Model returned non-JSON output (%1).").arg(perr)); return; }
             cb(ThreadSummary::fromJson(tid, mid, o), {});
         });
 }
@@ -169,7 +231,7 @@ void ClaudeClient::draftEmail(const DraftRequest& req, std::function<void(const 
         "The user's DIRECTION NOTES are raw thoughts: never copy them verbatim. Polish, rewrite and expand them into "
         "professional, natural prose in the user's voice.\n"
         "Writing style requirements from the user (follow strictly):\n%3\n\n"
-        "Respond with ONLY a strict JSON object with two string keys, subject and body_html. No markdown fences, no comments.\n"
+        "Submit the result with the submit_draft tool.\n"
         "body_html is simple HTML using <p>, <ul>, <li>, <b> only; no <html>/<body> wrappers, no signature block, no quoted thread.\n"
         "%4")
         .arg(req.userName, modeText,
@@ -180,23 +242,24 @@ void ClaudeClient::draftEmail(const DraftRequest& req, std::function<void(const 
     if (!req.subject.isEmpty()) user += QStringLiteral("CURRENT SUBJECT: %1\n\n").arg(req.subject);
     if (!req.threadContext.isEmpty()) user += QStringLiteral("CONVERSATION CONTEXT:\n%1\n").arg(req.threadContext.right(16000));
 
-    complete(system, user, 1500, [cb](const QString& text, const QString& err) {
-        if (!err.isEmpty()) { cb({}, err); return; }
-        const QJsonObject o = parseJsonObject(text, nullptr);
-        DraftResult r;
-        if (!o.isEmpty()) {
+    const QJsonObject schema = QJsonDocument::fromJson(R"JSON({
+      "type": "object",
+      "properties": {
+        "subject": {"type": "string"},
+        "body_html": {"type": "string", "description": "simple HTML using <p>, <ul>, <li>, <b> only"}
+      },
+      "required": ["subject", "body_html"]
+    })JSON").object();
+
+    completeStructured(system, user, QStringLiteral("submit_draft"), QStringLiteral("Submit the drafted email."), schema, 1500,
+        [cb](const QJsonObject& o, const QString& err) {
+            if (!err.isEmpty()) { cb({}, err); return; }
+            DraftResult r;
             r.subject = o.value(QStringLiteral("subject")).toString();
             r.bodyHtml = o.value(QStringLiteral("body_html")).toString();
-        }
-        if (r.bodyHtml.isEmpty()) {
-            // Fall back to treating the whole response as prose.
-            QString t = text.toHtmlEscaped();
-            t.replace(QStringLiteral("\n\n"), QStringLiteral("</p><p>"));
-            t.replace('\n', QStringLiteral("<br>"));
-            r.bodyHtml = QStringLiteral("<p>%1</p>").arg(t);
-        }
-        cb(r, {});
-    });
+            if (r.bodyHtml.isEmpty()) { cb({}, QStringLiteral("Model returned an empty draft.")); return; }
+            cb(r, {});
+        });
 }
 
 } // namespace ponymail

@@ -14,6 +14,7 @@ class ClaudeClient : public QObject {
     Q_OBJECT
 public:
     using TextCallback = std::function<void(const QString& text, const QString& error)>;
+    using JsonCallback = std::function<void(const QJsonObject& input, const QString& error)>;
     using SummaryCallback = std::function<void(const ThreadSummary& summary, const QString& error)>;
 
     explicit ClaudeClient(Settings* settings, QNetworkAccessManager* nam, QObject* parent = nullptr);
@@ -39,6 +40,9 @@ public:
 
     void complete(const QString& system, const QString& user, int maxTokens, TextCallback cb);
     void complete(const QString& system, const QString& user, int maxTokens, const QString& assistantPrefill, TextCallback cb);
+    // Structured output via a forced tool call: the API returns a parsed object matching inputSchema.
+    void completeStructured(const QString& system, const QString& user, const QString& toolName,
+                            const QString& toolDescription, const QJsonObject& inputSchema, int maxTokens, JsonCallback cb);
 
     // Lenient JSON recovery: strips fences, // comments and trailing commas.
     static QString extractJson(const QString& text);
