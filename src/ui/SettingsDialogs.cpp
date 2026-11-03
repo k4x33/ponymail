@@ -90,7 +90,7 @@ void AccountDialog::refreshState()
     m_state->setText(in ? QStringLiteral("<b>%1</b> &nbsp;·&nbsp; %2").arg(providerDisplayName(m_auth->activeProvider()), m_settings->userEmail().toHtmlEscaped())
                         : QStringLiteral("No account connected"));
     m_signOut->setEnabled(in);
-    m_addAccount->setText(in ? QStringLiteral("Switch account…") : QStringLiteral("Add account…"));
+    m_addAccount->setText(in ? QStringLiteral("Switch account / change client…") : QStringLiteral("Add account…"));
 }
 
 // ---------------------------------------------------------------------------

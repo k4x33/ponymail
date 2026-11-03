@@ -113,6 +113,14 @@ void OAuthManager::setUserClient(Provider p, const QString& id, const QString& s
     if (endpoints(p).needsSecret) CredentialStore::write(secretKey(p), secret.trimmed());
 }
 
+QString OAuthManager::userClientId(Provider p) const { return m_settings->clientId(providerKey(p)); }
+
+void OAuthManager::clearUserClient(Provider p)
+{
+    m_settings->setClientId(providerKey(p), QString());
+    CredentialStore::remove(secretKey(p));
+}
+
 QString OAuthManager::randomString(int len)
 {
     static const char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";

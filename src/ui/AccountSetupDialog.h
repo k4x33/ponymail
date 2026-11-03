@@ -41,7 +41,7 @@ private:
     QWidget* m_devBox;
     QLineEdit *m_devClientId, *m_devClientSecret;
     QLabel* m_devSecretLabel;
-    QPushButton *m_launchBtn, *m_reopenBtn, *m_copyBtn;
+    QPushButton *m_launchBtn, *m_reopenBtn, *m_copyBtn, *m_clearClientBtn;
     QUrl m_lastUrl;
 };
 

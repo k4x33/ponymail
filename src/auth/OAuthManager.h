@@ -43,6 +43,8 @@ public:
     QString clientId(Provider p) const;
     QString clientSecret(Provider p) const;         // Google only; Microsoft public clients have none
     void setUserClient(Provider p, const QString& clientId, const QString& clientSecret);
+    QString userClientId(Provider p) const;        // user-supplied id only (empty when relying on built-in)
+    void clearUserClient(Provider p);
 
     // Opens the system browser and waits for the loopback redirect.
     void startInteractiveLogin(Provider p);

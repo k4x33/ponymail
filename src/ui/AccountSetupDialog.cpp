@@ -64,9 +64,12 @@ AccountSetupDialog::AccountSetupDialog(OAuthManager* auth, const Theme& theme, Q
         accept();
     });
     connect(m_auth, &OAuthManager::authFailed, this, [this](const QString& err) {
-        m_signInStatus->setText(QStringLiteral("<span style='color:%1'>Sign-in failed: %2</span>").arg(m_theme.danger.name(), err.toHtmlEscaped()));
+        QString msg = QStringLiteral("<span style='color:%1'>Sign-in failed: %2</span>").arg(m_theme.danger.name(), err.toHtmlEscaped());
+        if (m_devBox->isVisible()) msg += QStringLiteral("<br><span style='color:%1'>Check the client ID and secret above, then click Try again.</span>").arg(m_theme.textMuted.name());
+        m_signInStatus->setText(msg);
         m_launchBtn->setEnabled(true);
         m_launchBtn->setText(QStringLiteral("Try again"));
+        m_devClientSecret->setFocus();
     });
 }
 
@@ -162,6 +165,16 @@ QWidget* AccountSetupDialog::buildSignIn()
     auto* row = new QHBoxLayout();
     auto* back = new QPushButton(QStringLiteral("Back"), page);
     connect(back, &QPushButton::clicked, this, [this]() { m_auth->cancelInteractiveLogin(); m_stack->setCurrentIndex(0); });
+    m_clearClientBtn = new QPushButton(QStringLiteral("Clear saved client"), page);
+    m_clearClientBtn->setProperty("danger", true);
+    connect(m_clearClientBtn, &QPushButton::clicked, this, [this]() {
+        m_auth->cancelInteractiveLogin();
+        m_auth->clearUserClient(m_provider);
+        m_devClientId->clear(); m_devClientSecret->clear();
+        m_signInStatus->setText(QStringLiteral("Saved client removed. Enter the new client ID and secret."));
+        m_launchBtn->setText(QStringLiteral("Continue")); m_launchBtn->setEnabled(true);
+        choose(m_provider);
+    });
     m_copyBtn = new QPushButton(QStringLiteral("Copy sign-in link"), page);
     m_copyBtn->setEnabled(false);
     connect(m_copyBtn, &QPushButton::clicked, this, [this]() { QApplication::clipboard()->setText(m_lastUrl.toString()); m_signInStatus->setText(QStringLiteral("Sign-in link copied. Paste it into any browser on this PC.")); });
@@ -173,6 +186,7 @@ QWidget* AccountSetupDialog::buildSignIn()
     m_launchBtn->setDefault(true);
     connect(m_launchBtn, &QPushButton::clicked, this, &AccountSetupDialog::launch);
     row->addWidget(back);
+    row->addWidget(m_clearClientBtn);
     row->addStretch();
     row->addWidget(m_copyBtn);
     row->addWidget(m_reopenBtn);
@@ -207,26 +221,34 @@ void AccountSetupDialog::choose(Provider p)
     const QString name = providerDisplayName(p);
     m_signInTitle->setText(QStringLiteral("<div style='font-size:22px;font-weight:600'>Sign in to %1</div>"
                                           "<div style='color:%2;margin-top:4px'>PonyMail will open your default browser to complete sign-in securely.</div>").arg(name, m_theme.textMuted.name()));
-    const bool needDev = !m_auth->hasClientConfig(p);
+    // Built-in client: nothing to ask. User-supplied client: always show the box so a
+    // wrong ID/secret can be corrected (prefilled ID, secret left blank = keep stored).
+    const bool builtIn = m_auth->hasBuiltInClient(p) && m_auth->userClientId(p).isEmpty();
+    const bool haveStored = m_auth->hasClientConfig(p);
+    const bool needDev = !builtIn;
     m_devBox->setVisible(needDev);
     if (needDev) {
         auto* hint = m_devBox->findChild<QLabel*>(QStringLiteral("devHint"));
+        const QString lead = haveStored ? QStringLiteral("<b>OAuth client.</b> Using your saved client. Edit either field to replace it; leave the secret blank to keep the stored one.")
+                                        : QStringLiteral("<b>One-time setup.</b> This build has no built-in %1 client.").arg(providerDisplayName(p));
         if (p == Provider::Google)
-            hint->setText(QStringLiteral("<b>One-time setup.</b> This build has no built-in Google client. Paste the Client ID and secret of an OAuth client of type <i>Desktop app</i> from Google Cloud Console (Gmail API enabled). Stored locally only."));
+            hint->setText(lead + QStringLiteral(" Paste the Client ID and secret of an OAuth client of type <i>Desktop app</i> from Google Cloud Console (Gmail API enabled). Stored locally only."));
         else
-            hint->setText(QStringLiteral("<b>One-time setup.</b> This build has no built-in Microsoft client. Paste the Application (client) ID of an Entra app registration with a <i>Mobile and desktop</i> redirect of <code>http://localhost</code> and Microsoft Graph <i>Mail.ReadWrite</i>, <i>Mail.Send</i>, <i>offline_access</i> permissions."));
+            hint->setText(lead + QStringLiteral(" Paste the Application (client) ID of an Entra app registration with a <i>Mobile and desktop</i> redirect of <code>http://localhost</code> and Microsoft Graph <i>Mail.ReadWrite</i>, <i>Mail.Send</i>, <i>offline_access</i> permissions."));
         m_devClientId->setText(m_auth->clientId(p));
         m_devClientSecret->clear();
+        m_devClientSecret->setPlaceholderText(haveStored && p == Provider::Google ? QStringLiteral("(stored — enter to replace)") : QStringLiteral("GOCSPX-…"));
         m_devSecretLabel->setVisible(p == Provider::Google);
         m_devClientSecret->setVisible(p == Provider::Google);
     }
-    m_signInStatus->setText(needDev ? QString() : QStringLiteral("Click Continue to open the browser."));
+    m_signInStatus->setText(QStringLiteral("Click Continue to open the browser."));
     m_launchBtn->setText(QStringLiteral("Continue"));
     m_launchBtn->setEnabled(true);
     m_reopenBtn->setEnabled(false);
     m_copyBtn->setEnabled(false);
+    m_clearClientBtn->setVisible(!m_auth->userClientId(p).isEmpty());
     m_stack->setCurrentIndex(1);
-    if (!needDev) launch();
+    if (builtIn) launch();
 }
 
 void AccountSetupDialog::launch()
