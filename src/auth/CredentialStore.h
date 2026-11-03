@@ -9,6 +9,8 @@ namespace ponymail {
 //   Windows : Windows Credential Manager (CredWriteW / CredReadW, generic
 //             credentials, persisted LOCAL_MACHINE scope encrypted via DPAPI
 //             for the current user).
+//   macOS   : Keychain (SecItemAdd / SecItemCopyMatching, generic password,
+//             service "PonyMail", account = key).
 //   Other   : development fallback — a 0600 file under the data dir. The
 //             shipped product targets Windows 11, so this path is never used
 //             by the installer build; it exists so the Linux CI/compile loop
@@ -22,6 +24,7 @@ public:
     static QString read(const QString& key);
     static bool remove(const QString& key);
     static bool isOsBacked();
+    static QString storeDisplayName();   // "Windows Credential Manager" | "macOS Keychain" | "local development store"
 };
 
 } // namespace ponymail

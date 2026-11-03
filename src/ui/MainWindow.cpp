@@ -43,6 +43,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QTimer>
+#include <QMenuBar>
 
 namespace ponymail {
 
@@ -274,6 +275,22 @@ void MainWindow::buildUi()
     m_splitter->setSizes({220, m_settings->splitterListWidth(), 900});
     setCentralWidget(m_splitter);
     statusBar()->showMessage(QStringLiteral("Ready"));
+#ifdef Q_OS_MAC
+    setUnifiedTitleAndToolBarOnMac(true);
+    // Native application menu: About / Preferences / Quit go where macOS users expect them.
+    QMenu* appMenu = menuBar()->addMenu(QStringLiteral("PonyMail"));
+    QAction* aboutA = appMenu->addAction(QStringLiteral("About PonyMail"));
+    aboutA->setMenuRole(QAction::AboutRole);
+    connect(aboutA, &QAction::triggered, this, [this]() { AboutDialog d(this); d.exec(); });
+    QAction* prefsA = appMenu->addAction(QStringLiteral("Settings…"));
+    prefsA->setMenuRole(QAction::PreferencesRole);
+    prefsA->setShortcut(QKeySequence::Preferences);
+    connect(prefsA, &QAction::triggered, this, &MainWindow::openAccountDialog);
+    QAction* quitA = appMenu->addAction(QStringLiteral("Quit PonyMail"));
+    quitA->setMenuRole(QAction::QuitRole);
+    quitA->setShortcut(QKeySequence::Quit);
+    connect(quitA, &QAction::triggered, qApp, &QApplication::closeAllWindows);
+#endif
 }
 
 void MainWindow::connectSignals()

@@ -49,7 +49,7 @@ AccountDialog::AccountDialog(Settings* settings, OAuthManager* auth, ClaudeClien
     auto* form2 = new QFormLayout();
     m_apiKey = new QLineEdit(this);
     m_apiKey->setEchoMode(QLineEdit::Password);
-    m_apiKey->setPlaceholderText(ai->hasApiKey() ? QStringLiteral("(stored in %1 — enter to replace)").arg(CredentialStore::isOsBacked() ? QStringLiteral("Credential Manager") : QStringLiteral("dev store")) : QStringLiteral("sk-ant-…"));
+    m_apiKey->setPlaceholderText(ai->hasApiKey() ? QStringLiteral("(stored in %1 — enter to replace)").arg(CredentialStore::storeDisplayName()) : QStringLiteral("sk-ant-…"));
     m_model = new QComboBox(this);
     m_model->setEditable(true);
     m_model->addItems({QStringLiteral("claude-haiku-5-5"), QStringLiteral("claude-sonnet-5-5"), QStringLiteral("claude-opus-5-5")});

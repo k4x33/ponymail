@@ -101,6 +101,8 @@ target_compile_definitions(ponymail_core PRIVATE
 if(WIN32)
     target_link_libraries(ponymail_core PUBLIC advapi32)
     target_compile_definitions(ponymail_core PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+elseif(APPLE)
+    target_link_libraries(ponymail_core PUBLIC "-framework Security" "-framework CoreFoundation")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -109,13 +111,24 @@ endif()
 if(WIN32)
     set(APP_ICON_RC "${CMAKE_CURRENT_SOURCE_DIR}/resources/ponymail.rc")
     add_executable(PonyMail WIN32 src/main.cpp ${APP_ICON_RC})
+elseif(APPLE)
+    set(APP_ICON_ICNS "${CMAKE_CURRENT_SOURCE_DIR}/resources/ponymail.icns")
+    set_source_files_properties(${APP_ICON_ICNS} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+    add_executable(PonyMail MACOSX_BUNDLE src/main.cpp ${APP_ICON_ICNS})
+    set_target_properties(PonyMail PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist.in"
+        MACOSX_BUNDLE_BUNDLE_NAME "PonyMail"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.ponymail.app"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_ICON_FILE "ponymail.icns")
 else()
     add_executable(PonyMail src/main.cpp)
 endif()
 target_link_libraries(PonyMail PRIVATE ponymail_core)
 set_target_properties(PonyMail PROPERTIES OUTPUT_NAME "PonyMail")
 
-install(TARGETS PonyMail RUNTIME DESTINATION .)
+install(TARGETS PonyMail RUNTIME DESTINATION . BUNDLE DESTINATION .)
 
 # ---------------------------------------------------------------------------
 # Tests

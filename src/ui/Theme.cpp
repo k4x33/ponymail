@@ -96,7 +96,7 @@ QString Theme::stylesheet() const
 {
     return QStringLiteral(R"QSS(
 QMainWindow, QDialog { background: %window%; color: %text%; }
-QWidget { color: %text%; font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; font-size: 13px; }
+QWidget { color: %text%; font-family: "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif; font-size: 13px; }
 QToolTip { background: %surface%; color: %text%; border: 1px solid %border%; padding: 4px 6px; }
 QSplitter::handle { background: %border%; }
 QSplitter::handle:horizontal { width: 1px; }

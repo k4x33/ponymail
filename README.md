@@ -1,8 +1,14 @@
 # PonyMail
 
-Native Windows 11 desktop email client for Gmail. C++17 / Qt 6 (Widgets + WebEngine). Talks directly to the Gmail REST API over OAuth 2.0 + PKCE and to the Claude API for thread summaries, triage and drafting. No intermediary servers, no telemetry, no read receipts.
+Native desktop email client for Gmail (Windows 11 and macOS 12+ on Apple Silicon). C++17 / Qt 6 (Widgets + WebEngine). Talks directly to the Gmail REST API over OAuth 2.0 + PKCE and to the Claude API for thread summaries, triage and drafting. No intermediary servers, no telemetry, no read receipts.
 
 ## Install
+
+### macOS (Apple Silicon)
+
+Open the latest run under **Actions → Build macOS app**, download `PonyMail-macOS-arm64`, open the DMG and drag PonyMail to Applications. The app is ad-hoc signed, not notarized, so the first launch needs **right-click → Open** (or `xattr -d com.apple.quarantine /Applications/PonyMail.app`). Tokens go to the macOS Keychain; local data lives in `~/Library/Application Support/PonyMail`.
+
+### Windows
 
 1. Open the latest run under **Actions → Build Windows installer** (or the latest **Release** for a tagged build).
 2. Download `PonyMail-Setup-win64` and run `PonyMail-Setup-<version>-win64.exe`.

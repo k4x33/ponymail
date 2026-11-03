@@ -6,6 +6,9 @@
 #  include <windows.h>
 #  include <wincred.h>
 #  include <vector>
+#elif defined(Q_OS_MAC)
+#  include <Security/Security.h>
+#  include <CoreFoundation/CoreFoundation.h>
 #else
 #  include <QFile>
 #  include <QDir>
@@ -56,6 +59,68 @@ bool CredentialStore::remove(const QString& key)
 }
 
 bool CredentialStore::isOsBacked() { return true; }
+QString CredentialStore::storeDisplayName() { return QStringLiteral("Windows Credential Manager"); }
+
+#elif defined(Q_OS_MAC) // ------------------------------------------------ macOS Keychain
+
+namespace {
+const char* kService = "PonyMail";
+
+CFStringRef cfString(const QString& s) { return s.toCFString(); }
+
+CFMutableDictionaryRef baseQuery(const QString& key)
+{
+    CFMutableDictionaryRef q = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFDictionarySetValue(q, kSecClass, kSecClassGenericPassword);
+    CFStringRef service = CFStringCreateWithCString(kCFAllocatorDefault, kService, kCFStringEncodingUTF8);
+    CFStringRef account = cfString(key);
+    CFDictionarySetValue(q, kSecAttrService, service);
+    CFDictionarySetValue(q, kSecAttrAccount, account);
+    CFRelease(service);
+    CFRelease(account);
+    return q;
+}
+}
+
+bool CredentialStore::write(const QString& key, const QString& secret)
+{
+    remove(key);
+    CFMutableDictionaryRef q = baseQuery(key);
+    const QByteArray blob = secret.toUtf8();
+    CFDataRef data = CFDataCreate(kCFAllocatorDefault, reinterpret_cast<const UInt8*>(blob.constData()), blob.size());
+    CFDictionarySetValue(q, kSecValueData, data);
+    CFDictionarySetValue(q, kSecAttrAccessible, kSecAttrAccessibleAfterFirstUnlock);
+    const OSStatus st = SecItemAdd(q, nullptr);
+    CFRelease(data);
+    CFRelease(q);
+    return st == errSecSuccess;
+}
+
+QString CredentialStore::read(const QString& key)
+{
+    CFMutableDictionaryRef q = baseQuery(key);
+    CFDictionarySetValue(q, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(q, kSecMatchLimit, kSecMatchLimitOne);
+    CFTypeRef result = nullptr;
+    const OSStatus st = SecItemCopyMatching(q, &result);
+    CFRelease(q);
+    if (st != errSecSuccess || !result) return {};
+    CFDataRef data = static_cast<CFDataRef>(result);
+    const QString out = QString::fromUtf8(reinterpret_cast<const char*>(CFDataGetBytePtr(data)), int(CFDataGetLength(data)));
+    CFRelease(result);
+    return out;
+}
+
+bool CredentialStore::remove(const QString& key)
+{
+    CFMutableDictionaryRef q = baseQuery(key);
+    const OSStatus st = SecItemDelete(q);
+    CFRelease(q);
+    return st == errSecSuccess || st == errSecItemNotFound;
+}
+
+bool CredentialStore::isOsBacked() { return true; }
+QString CredentialStore::storeDisplayName() { return QStringLiteral("macOS Keychain"); }
 
 #else // ------------------------------------------------------------------ dev fallback
 
@@ -95,6 +160,7 @@ bool CredentialStore::remove(const QString& key)
 }
 
 bool CredentialStore::isOsBacked() { return false; }
+QString CredentialStore::storeDisplayName() { return QStringLiteral("local development store"); }
 
 #endif
 

@@ -1,4 +1,5 @@
 #include "AccountSetupDialog.h"
+#include "auth/CredentialStore.h"
 #include <QStackedWidget>
 #include <QLabel>
 #include <QLineEdit>
@@ -113,7 +114,7 @@ QWidget* AccountSetupDialog::buildPicker()
     l->addWidget(providerCard(QStringLiteral("@"), QColor("#64748B"), QStringLiteral("Other"),
                               QStringLiteral("IMAP, POP or Exchange account"), [this]() { m_stack->setCurrentIndex(2); }));
     l->addStretch();
-    auto* foot = new QLabel(QStringLiteral("<span style='color:%1;font-size:12px'>Sign-in happens in your browser. PonyMail never sees your password; tokens are kept in Windows Credential Manager.</span>").arg(m_theme.textFaint.name()), page);
+    auto* foot = new QLabel(QStringLiteral("<span style='color:%1;font-size:12px'>Sign-in happens in your browser. PonyMail never sees your password; tokens are kept in %2.</span>").arg(m_theme.textFaint.name(), CredentialStore::storeDisplayName()), page);
     foot->setWordWrap(true);
     l->addWidget(foot);
     auto* row = new QHBoxLayout();
