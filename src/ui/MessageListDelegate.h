@@ -11,7 +11,6 @@ class MessageListDelegate : public QStyledItemDelegate {
     Q_OBJECT
 public:
     enum HoverAction { None, Star, Delete, ReadToggle };
-    static constexpr int kRowHeight = 76;
     static constexpr int kTabWidth = 26;
     static constexpr int kUnreadBarWidth = 3;
 
@@ -25,6 +24,7 @@ public:
     // Hit-testing for hover actions (view calls this on click).
     HoverAction actionAt(const QRect& rowRect, const QPoint& pos) const;
     static QRect actionRect(const QRect& rowRect, HoverAction a);
+    static int rowHeightFor(const QFont& f);
 
 private:
     Theme m_theme = Theme::light();

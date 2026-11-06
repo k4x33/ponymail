@@ -11,16 +11,24 @@ namespace ponymail {
 
 MessageListDelegate::MessageListDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
 
+// Row metrics derive from the view's font so the list matches the rest of the UI on every
+// platform (13px on Windows, 13pt on macOS). k = line height of the base font in px.
+int MessageListDelegate::rowHeightFor(const QFont& f)
+{
+    const QFontMetrics fm(f);
+    return qRound(fm.height() * 4.1);   // sender + subject + snippet + padding
+}
+
 QSize MessageListDelegate::sizeHint(const QStyleOptionViewItem& opt, const QModelIndex&) const
 {
-    return QSize(opt.rect.width(), kRowHeight);
+    return QSize(opt.rect.width(), rowHeightFor(opt.font));
 }
 
 QRect MessageListDelegate::actionRect(const QRect& r, HoverAction a)
 {
-    const int size = 26, gap = 4;
+    const int size = qBound(24, r.height() / 3, 34), gap = 4;
     const int right = r.right() - kUnreadBarWidth - 10;
-    const int y = r.top() + 8;
+    const int y = r.top() + size / 3;
     switch (a) {
     case ReadToggle: return QRect(right - size, y, size, size);
     case Delete: return QRect(right - 2 * size - gap, y, size, size);
@@ -75,13 +83,14 @@ void MessageListDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, co
     } else {
         p->fillRect(tab, tagColor);
         p->setPen(Qt::white);
-        QFont f = opt.font; f.setBold(true); f.setPointSizeF(tag == TriageTag::FollowUp ? 8.5 : 10.5);
+        QFont f = opt.font; f.setBold(true); f.setPointSizeF((opt.font.pointSizeF() > 0 ? opt.font.pointSizeF() : 10.0) * (tag == TriageTag::FollowUp ? 0.8 : 1.0));
         p->setFont(f);
         const QString letter = Triage::tagLetter(tag);
         if (tag == TriageTag::Action && tagCount > 1) {
-            p->drawText(QRect(tab.left(), tab.top() + 14, tab.width(), 18), Qt::AlignCenter, letter);
-            QFont fc = f; fc.setPointSizeF(8.5); p->setFont(fc);
-            p->drawText(QRect(tab.left(), tab.top() + 34, tab.width(), 16), Qt::AlignCenter, QString::number(tagCount));
+            const int th = tab.height();
+            p->drawText(QRect(tab.left(), tab.top() + th / 5, tab.width(), th / 4), Qt::AlignCenter, letter);
+            QFont fc = f; fc.setPointSizeF(fc.pointSizeF() * 0.8); p->setFont(fc);
+            p->drawText(QRect(tab.left(), tab.top() + th / 2, tab.width(), th / 4), Qt::AlignCenter, QString::number(tagCount));
         } else {
             p->drawText(tab, Qt::AlignCenter, letter);
         }
@@ -96,10 +105,20 @@ void MessageListDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, co
     int rightEdge = rightPad;
     if (hovered) rightEdge = actionRect(r, Star).left() - 8;
 
-    QFont senderFont = opt.font; senderFont.setPointSizeF(10.5); senderFont.setBold(unread);
-    QFont subjectFont = opt.font; subjectFont.setPointSizeF(10); subjectFont.setBold(unread);
-    QFont snippetFont = opt.font; snippetFont.setPointSizeF(9.5);
-    QFont timeFont = opt.font; timeFont.setPointSizeF(9);
+    const QFont base = opt.font;
+    const qreal basePt = base.pointSizeF() > 0 ? base.pointSizeF() : 10.0;
+    auto scaled = [&](qreal factor, bool bold = false) { QFont f = base; f.setPointSizeF(basePt * factor); f.setBold(bold); return f; };
+    QFont senderFont = scaled(1.0, unread);
+    QFont subjectFont = scaled(0.95, unread);
+    QFont snippetFont = scaled(0.9);
+    QFont timeFont = scaled(0.85);
+    const QFontMetrics baseFm(base);
+    const int lh = baseFm.height();                 // one text line
+    const int pad = qRound(lh * 0.45);
+    const int line1 = r.top() + pad;                // sender
+    const int line2 = line1 + lh + qRound(lh * 0.15);   // subject
+    const int line3 = line2 + lh + qRound(lh * 0.15);   // snippet
+    const int iconSz = qRound(lh * 1.1);
 
     // Timestamp (top right, hidden under hover actions)
     const QString ts = idx.data(MessageListModel::TimestampRole).toString();
@@ -108,7 +127,7 @@ void MessageListDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, co
     if (!hovered) {
         p->setFont(timeFont);
         p->setPen(unread ? m_theme.accent : m_theme.textMuted);
-        p->drawText(QRect(rightPad - tsWidth, r.top() + 10, tsWidth, 16), Qt::AlignRight | Qt::AlignVCenter, ts);
+        p->drawText(QRect(rightPad - tsWidth, line1, tsWidth, lh), Qt::AlignRight | Qt::AlignVCenter, ts);
     }
 
     // Sender line
@@ -117,11 +136,11 @@ void MessageListDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, co
     QString sender = idx.data(MessageListModel::SenderRole).toString();
     int senderRight = hovered ? rightEdge : rightPad - tsWidth - 10;
     if (msgCount > 1) {
-        QFont cf = timeFont; cf.setPointSizeF(8.5);
+        QFont cf = scaled(0.8);
         QFontMetrics cfm(cf);
         const QString cnt = QString::number(msgCount);
         const int cw = cfm.horizontalAdvance(cnt) + 10;
-        QRect cr(senderRight - cw, r.top() + 12, cw, 15);
+        QRect cr(senderRight - cw, line1 + (lh - cfm.height()) / 2, cw, cfm.height());
         p->setPen(Qt::NoPen); p->setBrush(m_theme.surfaceAlt.darker(104));
         p->drawRoundedRect(cr, 7, 7);
         p->setFont(cf); p->setPen(m_theme.textMuted); p->drawText(cr, Qt::AlignCenter, cnt);
@@ -130,49 +149,53 @@ void MessageListDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, co
     }
     QFontMetrics sfm(senderFont);
     sender = sfm.elidedText(sender, Qt::ElideRight, senderRight - left);
-    p->drawText(QRect(left, r.top() + 8, senderRight - left, 20), Qt::AlignLeft | Qt::AlignVCenter, sender);
+    p->drawText(QRect(left, line1, senderRight - left, lh), Qt::AlignLeft | Qt::AlignVCenter, sender);
 
     // Subject line with badges
     int x = left;
-    const int subjY = r.top() + 30;
+    const int subjY = line2;
     if (isDraft) {
         QFont bf = timeFont; bf.setBold(true); p->setFont(bf); p->setPen(m_theme.danger);
-        p->drawText(QRect(x, subjY, 46, 18), Qt::AlignVCenter, QStringLiteral("[Draft]"));
-        x += 48;
+        const int dw = QFontMetrics(bf).horizontalAdvance(QStringLiteral("[Draft]")) + 4;
+        p->drawText(QRect(x, subjY, dw, lh), Qt::AlignVCenter, QStringLiteral("[Draft]"));
+        x += dw + 2;
     }
     p->setFont(subjectFont);
     p->setPen(unread ? m_theme.text : m_theme.textMuted);
     QString subject = idx.data(MessageListModel::SubjectRole).toString();
     int badgeSpace = 0;
-    if (hasAtt) badgeSpace += 22;
-    if (calendar) badgeSpace += 22;
-    if (blocked) badgeSpace += 62;
+    if (hasAtt) badgeSpace += iconSz + 4;
+    if (calendar) badgeSpace += iconSz + 4;
+    if (blocked) badgeSpace += qRound(lh * 3.6);
     QFontMetrics sbfm(subjectFont);
     subject = sbfm.elidedText(subject, Qt::ElideRight, rightEdge - x - badgeSpace);
-    p->drawText(QRect(x, subjY, rightEdge - x - badgeSpace, 18), Qt::AlignLeft | Qt::AlignVCenter, subject);
+    p->drawText(QRect(x, subjY, rightEdge - x - badgeSpace, lh), Qt::AlignLeft | Qt::AlignVCenter, subject);
 
     int bx = rightEdge;
     if (blocked) {
-        QRect br(bx - 58, subjY + 1, 58, 16);
+        QFont bf = scaled(0.75, true);
+        const int bw = QFontMetrics(bf).horizontalAdvance(QStringLiteral("BLOCKED")) + 12;
+        const int bh = qRound(lh * 0.95);
+        QRect br(bx - bw, subjY + (lh - bh) / 2, bw, bh);
         p->setPen(Qt::NoPen); p->setBrush(m_theme.danger);
-        p->drawRoundedRect(br, 8, 8);
-        QFont bf = timeFont; bf.setBold(true); bf.setPointSizeF(8); p->setFont(bf); p->setPen(Qt::white);
+        p->drawRoundedRect(br, bh / 2, bh / 2);
+        p->setFont(bf); p->setPen(Qt::white);
         p->drawText(br, Qt::AlignCenter, QStringLiteral("BLOCKED"));
-        bx -= 64;
+        bx -= bw + 6;
     }
-    if (calendar) { Icons::paint(*p, QStringLiteral("calendar"), QRectF(bx - 18, subjY, 18, 18), m_theme.textMuted); bx -= 22; }
-    if (hasAtt) { Icons::paint(*p, QStringLiteral("paperclip"), QRectF(bx - 18, subjY, 18, 18), m_theme.textMuted); bx -= 22; }
+    if (calendar) { Icons::paint(*p, QStringLiteral("calendar"), QRectF(bx - iconSz, subjY, iconSz, iconSz), m_theme.textMuted); bx -= iconSz + 4; }
+    if (hasAtt) { Icons::paint(*p, QStringLiteral("paperclip"), QRectF(bx - iconSz, subjY, iconSz, iconSz), m_theme.textMuted); bx -= iconSz + 4; }
 
     // Snippet
     p->setFont(snippetFont);
     p->setPen(m_theme.textFaint);
     QFontMetrics snfm(snippetFont);
     QString snippet = idx.data(MessageListModel::SnippetRole).toString().simplified();
-    snippet = snfm.elidedText(snippet, Qt::ElideRight, rightPad - left - (starred && !hovered ? 22 : 0));
-    p->drawText(QRect(left, r.top() + 50, rightPad - left, 18), Qt::AlignLeft | Qt::AlignVCenter, snippet);
+    snippet = snfm.elidedText(snippet, Qt::ElideRight, rightPad - left - (starred && !hovered ? iconSz + 4 : 0));
+    p->drawText(QRect(left, line3, rightPad - left, lh), Qt::AlignLeft | Qt::AlignVCenter, snippet);
 
     // Persistent star indicator (bottom right) when starred and not hovered
-    if (starred && !hovered) Icons::paint(*p, QStringLiteral("starFilled"), QRectF(rightPad - 16, r.top() + 50, 16, 16), m_theme.warning);
+    if (starred && !hovered) Icons::paint(*p, QStringLiteral("starFilled"), QRectF(rightPad - iconSz, line3, iconSz, iconSz), m_theme.warning);
 
     // Hover quick actions
     if (hovered) {
